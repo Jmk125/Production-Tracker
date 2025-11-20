@@ -43,10 +43,14 @@
             <select id="viewType" onchange="updateChart()">
               <option value="total">Total Hours</option>
               <option value="costCode">By Cost Code</option>
+              <option value="costCodeDivision">By Cost Code Division</option>
               <option value="payClass">By Pay Class</option>
               <option value="job">By Job/Building</option>
               <option value="employee">By Employee</option>
             </select>
+            <label style="display: inline-flex; align-items: center; gap: 0.35rem; font-size: 0.9rem; color: var(--text-secondary);">
+              <input type="checkbox" id="stackToggle" checked onchange="updateChart()"> Stack bars
+            </label>
           </div>
         </div>
         <div class="chart-container">
@@ -138,6 +142,7 @@
     let timeEntries = [];
     let detailedStats = [];
     let hoursChart = null;
+    let payClassChart = null;
 
     document.addEventListener('DOMContentLoaded', async () => {
       await loadProject();
@@ -227,7 +232,20 @@
       const totalHours = timeEntries.reduce((sum, entry) => sum + entry.hours, 0);
       const uniqueEmployees = new Set(timeEntries.map(e => e.employee_name)).size;
       const costCodes = new Set(timeEntries.map(e => e.cost_code).filter(Boolean)).size;
-      
+
+      const payClassTotals = timeEntries.reduce((acc, entry) => {
+        const key = entry.pay_class || 'Unknown';
+        acc[key] = (acc[key] || 0) + entry.hours;
+        return acc;
+      }, {});
+      const payClassEntries = Object.entries(payClassTotals).sort((a, b) => b[1] - a[1]);
+
+      const positiveHours = payClassEntries.map(([, hours]) => hours).filter(h => h > 0);
+      const ratioBase = positiveHours.length ? Math.min(...positiveHours) : 0;
+      const ratioText = ratioBase > 0
+        ? payClassEntries.map(([name, hours]) => `${name}: ${Math.round(hours / ratioBase)}`).join(' • ')
+        : 'No pay class hours available yet.';
+
       const dateRange = timeEntries.length > 0 ? {
         start: new Date(Math.min(...timeEntries.map(e => new Date(e.date)))),
         end: new Date(Math.max(...timeEntries.map(e => new Date(e.date))))
@@ -235,23 +253,25 @@
 
       document.getElementById('summaryStats').innerHTML = `
         <div style="display: grid; gap: 1rem;">
-          <div>
-            <div style="font-size: 1.875rem; font-weight: 700; color: var(--primary-color);">
-              ${totalHours.toLocaleString()}
+          <div style="display: grid; grid-template-columns: repeat(auto-fit, minmax(140px, 1fr)); gap: 1rem;">
+            <div>
+              <div style="font-size: 1.875rem; font-weight: 700; color: var(--primary-color);">
+                ${totalHours.toLocaleString(undefined, { maximumFractionDigits: 1 })}
+              </div>
+              <div style="color: var(--text-secondary); font-size: 0.875rem;">Total Hours</div>
             </div>
-            <div style="color: var(--text-secondary); font-size: 0.875rem;">Total Hours</div>
-          </div>
-          <div>
-            <div style="font-size: 1.875rem; font-weight: 700; color: var(--primary-color);">
-              ${uniqueEmployees}
+            <div>
+              <div style="font-size: 1.875rem; font-weight: 700; color: var(--primary-color);">
+                ${uniqueEmployees}
+              </div>
+              <div style="color: var(--text-secondary); font-size: 0.875rem;">Unique Employees</div>
             </div>
-            <div style="color: var(--text-secondary); font-size: 0.875rem;">Unique Employees</div>
-          </div>
-          <div>
-            <div style="font-size: 1.875rem; font-weight: 700; color: var(--primary-color);">
-              ${costCodes}
+            <div>
+              <div style="font-size: 1.875rem; font-weight: 700; color: var(--primary-color);">
+                ${costCodes}
+              </div>
+              <div style="color: var(--text-secondary); font-size: 0.875rem;">Cost Codes</div>
             </div>
-            <div style="color: var(--text-secondary); font-size: 0.875rem;">Cost Codes</div>
           </div>
           ${dateRange ? `
             <div style="margin-top: 0.5rem; padding-top: 1rem; border-top: 1px solid var(--border-color);">
@@ -260,8 +280,34 @@
               </div>
             </div>
           ` : ''}
+          ${payClassEntries.length ? `
+            <div style="display: grid; grid-template-columns: repeat(auto-fit, minmax(260px, 1fr)); gap: 1.25rem; align-items: center;">
+              <div style="display: grid; gap: 0.75rem;">
+                <div style="font-weight: 600;">Hours by Pay Class</div>
+                <div style="display: grid; gap: 0.5rem;">
+                  ${payClassEntries.map(([name, hours]) => {
+                    const percentage = totalHours > 0 ? (hours / totalHours) * 100 : 0;
+                    return `
+                      <div style="display: flex; justify-content: space-between; align-items: center; padding: 0.4rem 0.5rem; background: #f8fafc; border: 1px solid var(--border-color); border-radius: 0.35rem;">
+                        <span style="font-weight: 600;">${escapeHtml(name)}</span>
+                        <span style="font-size: 0.9rem; color: var(--text-secondary);">${hours.toFixed(2)} hrs (${percentage.toFixed(1)}%)</span>
+                      </div>
+                    `;
+                  }).join('')}
+                </div>
+                <div style="font-size: 0.875rem; color: var(--text-secondary);">Ratio (relative to smallest class): ${ratioText}</div>
+              </div>
+              <div style="min-height: 240px;">
+                <canvas id="payClassChart" aria-label="Pay class doughnut chart"></canvas>
+              </div>
+            </div>
+          ` : `<p style="color: var(--text-secondary);">No pay class data yet.</p>`}
         </div>
       `;
+
+      if (payClassEntries.length) {
+        renderPayClassChart(payClassEntries, totalHours);
+      }
     }
 
     function renderUploads(uploads) {
@@ -305,6 +351,7 @@
 
     function updateChart() {
       const viewType = document.getElementById('viewType').value;
+      const stacked = document.getElementById('stackToggle').checked;
       const ctx = document.getElementById('hoursChart');
       
       if (hoursChart) {
@@ -317,6 +364,8 @@
         chartData = aggregateByMonth(detailedStats);
       } else if (viewType === 'costCode') {
         chartData = aggregateByCategory(detailedStats, 'cost_code');
+      } else if (viewType === 'costCodeDivision') {
+        chartData = aggregateByCategory(detailedStats, 'cost_code', formatCostCodeDivision);
       } else if (viewType === 'payClass') {
         chartData = aggregateByCategory(detailedStats, 'pay_class');
       } else if (viewType === 'job') {
@@ -342,13 +391,13 @@
           },
           scales: {
             x: {
-              stacked: viewType !== 'total',
+              stacked,
               grid: {
                 display: false
               }
             },
             y: {
-              stacked: viewType !== 'total',
+              stacked,
               beginAtZero: true,
               title: {
                 display: true,
@@ -385,12 +434,13 @@
       };
     }
 
-    function aggregateByCategory(data, category) {
+    function aggregateByCategory(data, category, transformer = null) {
       const monthlyData = {};
       const categories = new Set();
 
       data.forEach(entry => {
-        const cat = entry[category] || 'Unknown';
+        const rawValue = entry[category];
+        const cat = transformer ? transformer(rawValue) : (rawValue || 'Unknown');
         categories.add(cat);
         
         if (!monthlyData[entry.month]) {
@@ -418,6 +468,13 @@
       };
     }
 
+    function formatCostCodeDivision(costCode) {
+      if (!costCode) return 'Unknown';
+      const trimmed = costCode.toString().trim();
+      if (trimmed.length < 2) return trimmed || 'Unknown';
+      return `${trimmed.slice(0, 2)} Division`;
+    }
+
     function generateColors(count) {
       const colors = [
         'rgba(37, 99, 235, 0.8)',
@@ -435,8 +492,50 @@
       while (colors.length < count) {
         colors.push(`rgba(${Math.random() * 255}, ${Math.random() * 255}, ${Math.random() * 255}, 0.8)`);
       }
-      
+
       return colors;
+    }
+
+    function renderPayClassChart(payClassEntries, totalHours) {
+      const ctx = document.getElementById('payClassChart');
+      if (!ctx) return;
+
+      if (payClassChart) {
+        payClassChart.destroy();
+      }
+
+      const labels = payClassEntries.map(([name]) => name);
+      const data = payClassEntries.map(([, hours]) => hours);
+      const colors = generateColors(labels.length);
+
+      payClassChart = new Chart(ctx, {
+        type: 'doughnut',
+        data: {
+          labels,
+          datasets: [{
+            data,
+            backgroundColor: colors,
+            borderWidth: 0
+          }]
+        },
+        options: {
+          plugins: {
+            tooltip: {
+              callbacks: {
+                label: (context) => {
+                  const hours = context.raw || 0;
+                  const percent = totalHours > 0 ? (hours / totalHours) * 100 : 0;
+                  return `${context.label}: ${hours.toFixed(2)} hrs (${percent.toFixed(1)}%)`;
+                }
+              }
+            },
+            legend: {
+              position: 'bottom'
+            }
+          },
+          cutout: '55%'
+        }
+      });
     }
 
     function setupUploadArea() {
