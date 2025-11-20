@@ -126,14 +126,14 @@
         <div class="card-header">
           <div>
             <h3 class="card-title" style="margin-bottom: 0.25rem;">Upload Budget Spreadsheet</h3>
-            <p style="color: var(--text-secondary); font-size: 0.9rem;">Upload Excel files that include a Phase column and a Labor Hours column.</p>
+            <p style="color: var(--text-secondary); font-size: 0.9rem;">We'll read cost codes from column D and labor hours from column K, then total by cost code.</p>
           </div>
         </div>
 
         <div id="budgetUploadArea" class="upload-area">
           <input type="file" id="budgetFileInput" accept=".xlsx,.xls" style="display: none;" onchange="handleBudgetFileSelect(event)">
           <p style="font-size: 1.125rem; margin-bottom: 0.5rem;">📊 Drop Excel budget here or click to browse</p>
-          <p style="color: var(--text-secondary); font-size: 0.875rem;">We'll total the Labor Hours for each Phase cost code (decimals removed).</p>
+          <p style="color: var(--text-secondary); font-size: 0.875rem;">Excel files with cost codes in column D and hours in column K.</p>
         </div>
 
         <div id="budgetUploadProgress" style="display: none; margin-top: 1rem;">
@@ -1017,6 +1017,7 @@
       }
     }
 
+    // FIXED: Updated budget parser to read from columns D and K
     async function parseBudgetFile(file) {
       if (typeof XLSX === 'undefined') {
         throw new Error('Spreadsheet parser not available.');
@@ -1024,43 +1025,53 @@
 
       const buffer = await file.arrayBuffer();
       const workbook = XLSX.read(buffer, { type: 'array' });
-      const firstSheet = workbook.SheetNames[0];
-      const sheet = workbook.Sheets[firstSheet];
+      
+      // Look for "Report" sheet, or use first sheet if not found
+      let sheetName = workbook.SheetNames.find(name => name.toLowerCase() === 'report');
+      if (!sheetName) {
+        sheetName = workbook.SheetNames[0];
+      }
+      
+      const sheet = workbook.Sheets[sheetName];
       const rows = XLSX.utils.sheet_to_json(sheet, { header: 1, defval: '' });
 
       if (!rows.length) {
         throw new Error('The spreadsheet is empty.');
       }
 
-      const headerRow = rows[0].map(cell => cell.toString().trim().toLowerCase());
-      const phaseIndex = headerRow.findIndex(h => h === 'phase');
-      const hoursIndex = headerRow.findIndex(h => h === 'labor hours');
-
-      if (phaseIndex === -1) {
-        throw new Error('Could not find a "Phase" column.');
-      }
-
-      if (hoursIndex === -1) {
-        throw new Error('Could not find a "Labor Hours" column.');
-      }
+      // Column D is index 3 (0-based), Column K is index 10
+      const costCodeIndex = 3;  // Column D
+      const hoursIndex = 10;     // Column K
 
       const totals = {};
+      let rowsProcessed = 0;
+      
+      // Start from row 1 to skip header row (row 0)
       for (let i = 1; i < rows.length; i++) {
         const row = rows[i];
         if (!row || row.length <= hoursIndex) continue;
-        const rawPhase = row[phaseIndex];
-        const hours = parseFloat(row[hoursIndex]);
-        const normalizedCode = normalizeCostCodeClient(rawPhase);
+        
+        const rawCode = row[costCodeIndex];
+        const rawHours = row[hoursIndex];
+        
+        // Skip if either value is missing or empty
+        if (!rawCode || rawCode === '') continue;
+        
+        const hours = parseFloat(rawHours);
+        const normalizedCode = normalizeCostCodeClient(rawCode);
 
+        // Only process if we have a valid cost code and numeric hours
         if (!normalizedCode || !Number.isFinite(hours)) continue;
 
         totals[normalizedCode] = (totals[normalizedCode] || 0) + hours;
+        rowsProcessed++;
       }
 
-        if (Object.keys(totals).length === 0) {
-          throw new Error('No cost codes with Labor Hours values were found.');
-        }
+      if (Object.keys(totals).length === 0) {
+        throw new Error(`No valid cost codes with labor hours were found. Processed ${rowsProcessed} rows from sheet "${sheetName}".`);
+      }
 
+      console.log(`Successfully parsed ${Object.keys(totals).length} unique cost codes from ${rowsProcessed} rows in sheet "${sheetName}"`);
       return totals;
     }
 
@@ -1080,9 +1091,11 @@
       document.getElementById(tabName + 'Tab').classList.add('active');
     }
 
+    // FIXED: Updated normalization to remove periods, hyphens, and spaces
     function normalizeCostCodeClient(code) {
       if (code === undefined || code === null) return null;
-      return code.toString().replace(/\./g, '').trim() || null;
+      // Remove periods, hyphens, and spaces for consistent matching
+      return code.toString().replace(/[\.\-\s]/g, '').trim() || null;
     }
 
     function formatDate(dateStr) {
