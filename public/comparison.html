@@ -43,14 +43,14 @@
       <!-- Comparison View -->
       <div>
         <div class="card" style="margin-bottom: 1.5rem;">
-          <div class="card-header">
-            <h3 class="card-title">Timeline Comparison</h3>
-            <div style="display: flex; gap: 1rem;">
-              <select id="timelineType" onchange="updateComparisonChart()">
+            <div class="card-header">
+              <h3 class="card-title">Timeline Comparison</h3>
+              <div style="display: flex; gap: 1rem;">
+              <select id="timelineType" onchange="updateCharts()">
                 <option value="project">Project Timeline (Month 1, 2, 3...)</option>
                 <option value="calendar">Calendar Timeline</option>
               </select>
-              <select id="comparisonView" onchange="updateComparisonChart()">
+              <select id="comparisonView" onchange="updateCharts()">
                 <option value="total">Total Hours</option>
                 <option value="costCode">By Cost Code</option>
                 <option value="payClass">By Pay Class</option>
@@ -60,6 +60,16 @@
           </div>
           <div class="chart-container">
             <canvas id="comparisonChart"></canvas>
+          </div>
+        </div>
+
+        <div class="card" style="margin-bottom: 1.5rem;">
+          <div class="card-header">
+            <h3 class="card-title">Monthly Employees</h3>
+            <div style="color: var(--text-secondary); font-size: 0.9rem;">Unique employees working each month</div>
+          </div>
+          <div class="chart-container" style="min-height: 360px;">
+            <canvas id="employeeComparisonChart"></canvas>
           </div>
         </div>
 
@@ -86,6 +96,15 @@
     let selectedProjects = new Set();
     let comparisonData = [];
     let comparisonChart = null;
+    let employeeComparisonChart = null;
+    const chartColors = [
+      'rgba(37, 99, 235, 1)',
+      'rgba(34, 197, 94, 1)',
+      'rgba(234, 179, 8, 1)',
+      'rgba(239, 68, 68, 1)',
+      'rgba(168, 85, 247, 1)',
+      'rgba(236, 72, 153, 1)'
+    ];
 
     document.addEventListener('DOMContentLoaded', loadProjects);
 
@@ -149,16 +168,21 @@
         });
 
         comparisonData = await response.json();
-        
+
         document.getElementById('emptyState').style.display = 'none';
         document.getElementById('metricsComparison').style.display = 'block';
-        
-        updateComparisonChart();
+
+        updateCharts();
         renderMetrics();
       } catch (error) {
         console.error('Error loading comparison:', error);
         alert('Error loading comparison data');
       }
+    }
+
+    function updateCharts() {
+      updateComparisonChart();
+      updateEmployeeChart();
     }
 
     function updateComparisonChart() {
@@ -224,16 +248,59 @@
       });
     }
 
-    function buildProjectTimelineChart(data, viewType) {
-      const colors = [
-        'rgba(37, 99, 235, 1)',
-        'rgba(34, 197, 94, 1)',
-        'rgba(234, 179, 8, 1)',
-        'rgba(239, 68, 68, 1)',
-        'rgba(168, 85, 247, 1)',
-        'rgba(236, 72, 153, 1)'
-      ];
+    function updateEmployeeChart() {
+      const timelineType = document.getElementById('timelineType').value;
 
+      if (comparisonData.length === 0) return;
+
+      const ctx = document.getElementById('employeeComparisonChart');
+
+      if (employeeComparisonChart) {
+        employeeComparisonChart.destroy();
+      }
+
+      const chartData = buildEmployeeChartData(comparisonData, timelineType);
+
+      employeeComparisonChart = new Chart(ctx, {
+        type: 'line',
+        data: chartData,
+        options: {
+          responsive: true,
+          maintainAspectRatio: false,
+          plugins: {
+            legend: {
+              display: true,
+              position: 'top'
+            },
+            tooltip: {
+              mode: 'index',
+              intersect: false
+            }
+          },
+          scales: {
+            x: {
+              grid: { display: true },
+              title: {
+                display: true,
+                text: timelineType === 'project' ? 'Project Month' : 'Calendar Month'
+              }
+            },
+            y: {
+              beginAtZero: true,
+              title: { display: true, text: 'Employees' },
+              ticks: { stepSize: 1 }
+            }
+          },
+          interaction: {
+            mode: 'nearest',
+            axis: 'x',
+            intersect: false
+          }
+        }
+      });
+    }
+
+    function buildProjectTimelineChart(data, viewType) {
       // Find max project month across all projects
       let maxMonth = 0;
       data.forEach(project => {
@@ -260,8 +327,8 @@
           return {
             label: project.data[0]?.project_name || `Project ${project.projectId}`,
             data: months.map(m => monthlyTotals[m] || 0),
-            borderColor: colors[index % colors.length],
-            backgroundColor: colors[index % colors.length].replace('1)', '0.1)'),
+            borderColor: chartColors[index % chartColors.length],
+            backgroundColor: chartColors[index % chartColors.length].replace('1)', '0.1)'),
             borderWidth: 2,
             tension: 0.1,
             fill: false
@@ -300,8 +367,8 @@
           return {
             label: cat,
             data: months.map(m => monthlyTotals[m] || 0),
-            borderColor: colors[index % colors.length],
-            backgroundColor: colors[index % colors.length].replace('1)', '0.3)'),
+            borderColor: chartColors[index % chartColors.length],
+            backgroundColor: chartColors[index % chartColors.length].replace('1)', '0.3)'),
             borderWidth: 2,
             tension: 0.1,
             fill: true
@@ -316,15 +383,6 @@
     }
 
     function buildCalendarTimelineChart(data, viewType) {
-      const colors = [
-        'rgba(37, 99, 235, 1)',
-        'rgba(34, 197, 94, 1)',
-        'rgba(234, 179, 8, 1)',
-        'rgba(239, 68, 68, 1)',
-        'rgba(168, 85, 247, 1)',
-        'rgba(236, 72, 153, 1)'
-      ];
-
       // Get all unique calendar months
       const allMonths = new Set();
       data.forEach(project => {
@@ -349,8 +407,8 @@
           return {
             label: project.data[0]?.project_name || `Project ${project.projectId}`,
             data: months.map(m => monthlyTotals[m] || 0),
-            borderColor: colors[index % colors.length],
-            backgroundColor: colors[index % colors.length].replace('1)', '0.1)'),
+            borderColor: chartColors[index % chartColors.length],
+            backgroundColor: chartColors[index % chartColors.length].replace('1)', '0.1)'),
             borderWidth: 2,
             tension: 0.1,
             fill: false
@@ -389,8 +447,8 @@
           return {
             label: cat,
             data: months.map(m => monthlyTotals[m] || 0),
-            borderColor: colors[index % colors.length],
-            backgroundColor: colors[index % colors.length].replace('1)', '0.3)'),
+            borderColor: chartColors[index % chartColors.length],
+            backgroundColor: chartColors[index % chartColors.length].replace('1)', '0.3)'),
             borderWidth: 2,
             tension: 0.1,
             fill: true
@@ -402,6 +460,86 @@
           datasets
         };
       }
+    }
+
+    function buildEmployeeChartData(data, timelineType) {
+      if (timelineType === 'project') {
+        let maxMonth = 0;
+        data.forEach(project => {
+          project.data.forEach(entry => {
+            if (entry.project_month > maxMonth) {
+              maxMonth = entry.project_month;
+            }
+          });
+        });
+
+        const months = Array.from({ length: maxMonth }, (_, i) => i + 1);
+
+        const datasets = data.map((project, index) => {
+          const monthlyEmployees = {};
+
+          project.data.forEach(entry => {
+            if (!monthlyEmployees[entry.project_month]) {
+              monthlyEmployees[entry.project_month] = new Set();
+            }
+            monthlyEmployees[entry.project_month].add(entry.employee_name);
+          });
+
+          return {
+            label: project.data[0]?.project_name || `Project ${project.projectId}`,
+            data: months.map(m => (monthlyEmployees[m] ? monthlyEmployees[m].size : 0)),
+            borderColor: chartColors[index % chartColors.length],
+            backgroundColor: chartColors[index % chartColors.length].replace('1)', '0.15)'),
+            borderWidth: 2,
+            tension: 0.1,
+            fill: false,
+            pointRadius: 3,
+            pointHoverRadius: 5
+          };
+        });
+
+        return {
+          labels: months.map(m => `Month ${m}`),
+          datasets
+        };
+      }
+
+      const allMonths = new Set();
+      data.forEach(project => {
+        project.data.forEach(entry => {
+          allMonths.add(entry.calendar_month);
+        });
+      });
+
+      const months = Array.from(allMonths).sort();
+
+      const datasets = data.map((project, index) => {
+        const monthlyEmployees = {};
+
+        project.data.forEach(entry => {
+          if (!monthlyEmployees[entry.calendar_month]) {
+            monthlyEmployees[entry.calendar_month] = new Set();
+          }
+          monthlyEmployees[entry.calendar_month].add(entry.employee_name);
+        });
+
+        return {
+          label: project.data[0]?.project_name || `Project ${project.projectId}`,
+          data: months.map(m => (monthlyEmployees[m] ? monthlyEmployees[m].size : 0)),
+          borderColor: chartColors[index % chartColors.length],
+          backgroundColor: chartColors[index % chartColors.length].replace('1)', '0.15)'),
+          borderWidth: 2,
+          tension: 0.1,
+          fill: false,
+          pointRadius: 3,
+          pointHoverRadius: 5
+        };
+      });
+
+      return {
+        labels: months.map(formatMonth),
+        datasets
+      };
     }
 
     function renderMetrics() {
