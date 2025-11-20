@@ -82,13 +82,18 @@
           <div id="budgetMeta" style="color: var(--text-secondary); font-size: 0.9rem;">Loading budget...</div>
         </div>
         <div id="budgetSummary" style="margin-top: 1rem;">Loading budget...</div>
-        <div class="grid grid-2" style="margin-top: 1.25rem; gap: 1.25rem;">
-          <div class="chart-container" style="min-height: 320px;">
-            <canvas id="budgetVarianceChart" aria-label="Budget variance by hours"></canvas>
+        <div class="chart-controls" style="align-items: center; margin-top: 1.25rem; justify-content: space-between;">
+          <div style="color: var(--text-secondary); font-size: 0.9rem;">Show variance by hours or percent for all cost codes</div>
+          <div style="display: inline-flex; gap: 0.5rem; align-items: center;">
+            <label for="budgetChartMode" style="font-size: 0.9rem; color: var(--text-secondary);">Display</label>
+            <select id="budgetChartMode" onchange="renderBudgetCharts()">
+              <option value="hours">Variance (hours)</option>
+              <option value="percent">Variance (%)</option>
+            </select>
           </div>
-          <div class="chart-container" style="min-height: 320px;">
-            <canvas id="budgetPercentChart" aria-label="Budget variance by percentage"></canvas>
-          </div>
+        </div>
+        <div class="chart-container" style="min-height: 420px;">
+          <canvas id="budgetVarianceChart" aria-label="Budget variance chart"></canvas>
         </div>
       </div>
     </div>
@@ -206,8 +211,7 @@
     let budgetComparison = [];
     let hoursChart = null;
     let payClassChart = null;
-    let budgetVarianceChart = null;
-    let budgetPercentChart = null;
+    let budgetChart = null;
 
     document.addEventListener('DOMContentLoaded', async () => {
       await loadProject();
@@ -478,9 +482,8 @@
       const totalActualHours = budgetComparison.reduce((sum, row) => sum + (row.actual_hours || 0), 0);
       const totalVariance = totalActualHours - totalBudgetHours;
 
-      const mostVariance = [...budgetComparison]
-        .sort((a, b) => Math.abs(b.variance_hours) - Math.abs(a.variance_hours))
-        .slice(0, 8);
+      const varianceRows = [...budgetComparison]
+        .sort((a, b) => Math.abs(b.variance_hours) - Math.abs(a.variance_hours));
 
       summaryEl.innerHTML = `
         <div style="display: grid; gap: 1rem;">
@@ -498,7 +501,7 @@
               <div style="color: var(--text-secondary); font-size: 0.9rem;">Variance (hrs)</div>
             </div>
           </div>
-          ${mostVariance.length ? `
+          ${varianceRows.length ? `
             <div style="overflow-x: auto;">
               <table style="width: 100%; border-collapse: collapse;">
                 <thead>
@@ -511,7 +514,7 @@
                   </tr>
                 </thead>
                 <tbody>
-                  ${mostVariance.map(row => `
+                  ${varianceRows.map(row => `
                     <tr style="border-bottom: 1px solid var(--border-color);">
                       <td style="padding: 0.5rem; font-weight: 600;">${escapeHtml(row.cost_code)}</td>
                       <td style="padding: 0.5rem; text-align: right;">${formatHours(row.budget_hours)}</td>
@@ -569,79 +572,69 @@
 
     function renderBudgetCharts() {
       const varianceCanvas = document.getElementById('budgetVarianceChart');
-      const percentCanvas = document.getElementById('budgetPercentChart');
+      const chartMode = document.getElementById('budgetChartMode')?.value || 'hours';
 
-      if (budgetVarianceChart) budgetVarianceChart.destroy();
-      if (budgetPercentChart) budgetPercentChart.destroy();
+      if (budgetChart) budgetChart.destroy();
 
-      if (!budgetData || !budgetData.latest || !budgetComparison.length) return;
+      if (!budgetData || !budgetData.latest || !budgetComparison.length || !varianceCanvas) return;
 
-      const varianceData = [...budgetComparison]
-        .sort((a, b) => Math.abs(b.variance_hours) - Math.abs(a.variance_hours))
-        .slice(0, 10);
+      const sortedRows = [...budgetComparison].sort((a, b) => Math.abs(b.variance_hours) - Math.abs(a.variance_hours));
+      const labels = sortedRows.map(row => row.cost_code);
 
-      if (varianceCanvas && varianceData.length) {
-        const labels = varianceData.map(row => row.cost_code);
-        const values = varianceData.map(row => row.variance_hours);
-        const colors = values.map(v => v >= 0 ? 'rgba(239, 68, 68, 0.8)' : 'rgba(34, 197, 94, 0.8)');
+      const values = sortedRows.map(row => {
+        if (chartMode === 'percent') {
+          return Number.isFinite(row.variance_percent) ? row.variance_percent : 0;
+        }
+        return row.variance_hours;
+      });
 
-        budgetVarianceChart = new Chart(varianceCanvas, {
-          type: 'bar',
-          data: {
-            labels,
-            datasets: [{
-              label: 'Variance (hrs)',
-              data: values,
-              backgroundColor: colors,
-              borderWidth: 0
-            }]
+      const colors = values.map((v, index) => {
+        const rawValue = chartMode === 'percent'
+          ? (Number.isFinite(sortedRows[index].variance_percent) ? sortedRows[index].variance_percent : 0)
+          : sortedRows[index].variance_hours;
+        return rawValue >= 0 ? 'rgba(239, 68, 68, 0.8)' : 'rgba(34, 197, 94, 0.8)';
+      });
+
+      const yLabel = chartMode === 'percent' ? 'Percent' : 'Hours';
+      const dataLabel = chartMode === 'percent' ? 'Variance (%)' : 'Variance (hrs)';
+
+      budgetChart = new Chart(varianceCanvas, {
+        type: 'bar',
+        data: {
+          labels,
+          datasets: [{
+            label: dataLabel,
+            data: values,
+            backgroundColor: colors,
+            borderWidth: 0
+          }]
+        },
+        options: {
+          responsive: true,
+          maintainAspectRatio: false,
+          plugins: {
+            legend: { display: false },
+            tooltip: {
+              callbacks: {
+                label: (context) => {
+                  const row = sortedRows[context.dataIndex];
+                  if (chartMode === 'percent') {
+                    const percent = Number.isFinite(row.variance_percent) ? row.variance_percent.toFixed(1) + '%' : 'N/A';
+                    return `${row.cost_code}: ${percent}`;
+                  }
+                  return `${row.cost_code}: ${formatHours(row.variance_hours)} hrs`;
+                }
+              }
+            }
           },
-          options: {
-            responsive: true,
-            maintainAspectRatio: false,
-            plugins: {
-              legend: { display: false }
-            },
-            scales: {
-              y: { beginAtZero: true, title: { display: true, text: 'Hours' } }
+          scales: {
+            y: {
+              beginAtZero: true,
+              title: { display: true, text: yLabel }
             }
           }
-        });
-      }
-
-      const percentData = budgetComparison
-        .filter(row => row.variance_percent !== null && Number.isFinite(row.variance_percent))
-        .sort((a, b) => Math.abs(b.variance_percent) - Math.abs(a.variance_percent))
-        .slice(0, 10);
-
-      if (percentCanvas && percentData.length) {
-        const labels = percentData.map(row => row.cost_code);
-        const values = percentData.map(row => row.variance_percent);
-        const colors = values.map(v => v >= 0 ? 'rgba(239, 68, 68, 0.8)' : 'rgba(34, 197, 94, 0.8)');
-
-        budgetPercentChart = new Chart(percentCanvas, {
-          type: 'bar',
-          data: {
-            labels,
-            datasets: [{
-              label: 'Variance (%)',
-              data: values,
-              backgroundColor: colors,
-              borderWidth: 0
-            }]
-          },
-          options: {
-            responsive: true,
-            maintainAspectRatio: false,
-            plugins: {
-              legend: { display: false }
-            },
-            scales: {
-              y: { beginAtZero: true, title: { display: true, text: 'Percent' } }
-            }
-          }
-        });
-      }
+        }
+      });
     }
 
     function updateChart() {
