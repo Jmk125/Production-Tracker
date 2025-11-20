@@ -56,6 +56,9 @@
                 <option value="costCodeDivision">By Cost Code Division</option>
                 <option value="payClass">By Pay Class</option>
                 <option value="job">By Job/Building</option>
+                <option value="division09">09 Package (Division 09 only)</option>
+                <option value="package06Combo">06 Package (Div 06, 08, 10, 11, 12)</option>
+                <option value="packageComparison">Packages: 09 vs 06/08/10/11/12</option>
               </select>
             </div>
           </div>
@@ -106,6 +109,7 @@
       'rgba(168, 85, 247, 1)',
       'rgba(236, 72, 153, 1)'
     ];
+    const packageViewTypes = ['division09', 'package06Combo', 'packageComparison'];
 
     document.addEventListener('DOMContentLoaded', loadProjects);
 
@@ -319,6 +323,14 @@
         };
       }
 
+      if (packageViewTypes.includes(viewType)) {
+        const packageDatasets = buildPackageDatasets(data, months, 'project_month', viewType);
+        return {
+          labels: months.map(m => `Month ${m}`),
+          datasets: packageDatasets
+        };
+      }
+
       const categoryDatasets = buildCategoryDatasets(data, months, 'project_month', viewType);
       return {
         labels: months.map(m => `Month ${m}`),
@@ -343,6 +355,14 @@
         return {
           labels: months.map(formatMonth),
           datasets
+        };
+      }
+
+      if (packageViewTypes.includes(viewType)) {
+        const packageDatasets = buildPackageDatasets(data, months, 'calendar_month', viewType);
+        return {
+          labels: months.map(formatMonth),
+          datasets: packageDatasets
         };
       }
 
@@ -563,6 +583,52 @@
       return datasets;
     }
 
+    function buildPackageDatasets(data, months, monthKey, viewType) {
+      const packageMap = {
+        division09: { '09 Package': ['09'] },
+        package06Combo: { '06 Package': ['06', '08', '10', '11', '12'] },
+        packageComparison: {
+          '09 Package': ['09'],
+          '06 Package': ['06', '08', '10', '11', '12']
+        }
+      };
+
+      const targetPackages = packageMap[viewType] || {};
+      const packageKeys = Object.keys(targetPackages);
+      const datasets = [];
+
+      data.forEach((project, projectIndex) => {
+        const projectName = project.data[0]?.project_name || `Project ${project.projectId}`;
+
+        packageKeys.forEach((pkgName, pkgIndex) => {
+          const divisions = targetPackages[pkgName];
+          const monthlyTotals = {};
+
+          project.data.forEach(entry => {
+            const division = getCostCodeDivision(entry.cost_code);
+            if (!divisions.includes(division)) return;
+
+            const month = entry[monthKey];
+            monthlyTotals[month] = (monthlyTotals[month] || 0) + entry.total_hours;
+          });
+
+          const color = getColor((projectIndex * packageKeys.length) + pkgIndex);
+
+          datasets.push({
+            label: `${projectName} - ${pkgName}`,
+            data: months.map(m => monthlyTotals[m] || 0),
+            borderColor: color,
+            backgroundColor: color.replace('1)', '0.2)'),
+            borderWidth: 2,
+            tension: 0.1,
+            fill: true
+          });
+        });
+      });
+
+      return datasets;
+    }
+
     function getCategoryLabel(viewType, entry) {
       if (viewType === 'costCode') return entry.cost_code;
       if (viewType === 'costCodeDivision') return formatCostCodeDivision(entry.cost_code);
@@ -576,6 +642,13 @@
       const trimmed = costCode.toString().trim();
       if (trimmed.length < 2) return trimmed || 'Unknown';
       return `${trimmed.slice(0, 2)} Division`;
+    }
+
+    function getCostCodeDivision(costCode) {
+      if (!costCode) return '';
+      const trimmed = costCode.toString().trim();
+      if (trimmed.length < 2) return '';
+      return trimmed.slice(0, 2);
     }
 
     function getColor(index) {
