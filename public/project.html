@@ -126,14 +126,14 @@
         <div class="card-header">
           <div>
             <h3 class="card-title" style="margin-bottom: 0.25rem;">Upload Budget Spreadsheet</h3>
-            <p style="color: var(--text-secondary); font-size: 0.9rem;">Upload Excel files with cost codes in the Phase column and hours in column I.</p>
+            <p style="color: var(--text-secondary); font-size: 0.9rem;">Upload Excel files that include a Phase column and a Labor Hours column.</p>
           </div>
         </div>
 
         <div id="budgetUploadArea" class="upload-area">
           <input type="file" id="budgetFileInput" accept=".xlsx,.xls" style="display: none;" onchange="handleBudgetFileSelect(event)">
           <p style="font-size: 1.125rem; margin-bottom: 0.5rem;">📊 Drop Excel budget here or click to browse</p>
-          <p style="color: var(--text-secondary); font-size: 0.875rem;">We'll total the hours in column I for each Phase cost code (decimals removed).</p>
+          <p style="color: var(--text-secondary); font-size: 0.875rem;">We'll total the Labor Hours for each Phase cost code (decimals removed).</p>
         </div>
 
         <div id="budgetUploadProgress" style="display: none; margin-top: 1rem;">
@@ -1034,10 +1034,14 @@
 
       const headerRow = rows[0].map(cell => cell.toString().trim().toLowerCase());
       const phaseIndex = headerRow.findIndex(h => h === 'phase');
-      const hoursIndex = 8; // Column I
+      const hoursIndex = headerRow.findIndex(h => h === 'labor hours');
 
       if (phaseIndex === -1) {
         throw new Error('Could not find a "Phase" column.');
+      }
+
+      if (hoursIndex === -1) {
+        throw new Error('Could not find a "Labor Hours" column.');
       }
 
       const totals = {};
@@ -1053,9 +1057,9 @@
         totals[normalizedCode] = (totals[normalizedCode] || 0) + hours;
       }
 
-      if (Object.keys(totals).length === 0) {
-        throw new Error('No cost codes with hours were found in column I.');
-      }
+        if (Object.keys(totals).length === 0) {
+          throw new Error('No cost codes with Labor Hours values were found.');
+        }
 
       return totals;
     }
