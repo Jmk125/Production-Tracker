@@ -60,6 +60,16 @@
         </div>
       </div>
 
+      <div class="card" style="margin-top: 1.5rem;">
+        <div class="card-header">
+          <h3 class="card-title">Monthly Employees</h3>
+          <div style="color: var(--text-secondary); font-size: 0.9rem;">Unique employees working each month</div>
+        </div>
+        <div class="chart-container" style="min-height: 320px;">
+          <canvas id="employeeChart" aria-label="Employees per month"></canvas>
+        </div>
+      </div>
+
       <div class="grid grid-2" style="margin-top: 1.5rem;">
         <div class="card">
           <h3 class="card-title">Summary Statistics</h3>
@@ -207,16 +217,19 @@
     let projectData = null;
     let timeEntries = [];
     let detailedStats = [];
+    let monthlyStats = [];
     let budgetData = null;
     let budgetComparison = [];
     let hoursChart = null;
     let payClassChart = null;
     let budgetChart = null;
+    let employeeChart = null;
 
     document.addEventListener('DOMContentLoaded', async () => {
       await loadProject();
       await loadTimeEntries();
       await loadDetailedStats();
+      await loadMonthlyStats();
       await loadBudgetData();
       await loadUploads();
       setupUploadArea();
@@ -259,6 +272,16 @@
         detailedStats = await response.json();
       } catch (error) {
         console.error('Error loading detailed stats:', error);
+      }
+    }
+
+    async function loadMonthlyStats() {
+      try {
+        const response = await fetch(`/api/projects/${projectId}/stats/monthly`);
+        monthlyStats = await response.json();
+        renderEmployeeChart();
+      } catch (error) {
+        console.error('Error loading monthly stats:', error);
       }
     }
 
@@ -754,6 +777,58 @@
         labels: months.map(formatMonth),
         datasets
       };
+    }
+
+    function renderEmployeeChart() {
+      const canvas = document.getElementById('employeeChart');
+      if (!canvas) return;
+
+      if (!monthlyStats || monthlyStats.length === 0) {
+        canvas.parentElement.innerHTML = '<p style="color: var(--text-secondary); text-align: center; padding: 2rem;">No employee data yet.</p>';
+        return;
+      }
+
+      if (employeeChart) {
+        employeeChart.destroy();
+      }
+
+      const labels = monthlyStats.map(stat => formatMonth(stat.month));
+      const counts = monthlyStats.map(stat => stat.employee_count);
+
+      employeeChart = new Chart(canvas, {
+        type: 'line',
+        data: {
+          labels,
+          datasets: [{
+            label: 'Employees',
+            data: counts,
+            borderColor: 'rgba(37, 99, 235, 1)',
+            backgroundColor: 'rgba(37, 99, 235, 0.15)',
+            borderWidth: 2,
+            tension: 0.2,
+            fill: true,
+            pointRadius: 4,
+            pointHoverRadius: 6
+          }]
+        },
+        options: {
+          responsive: true,
+          maintainAspectRatio: false,
+          plugins: {
+            legend: { display: false }
+          },
+          scales: {
+            y: {
+              beginAtZero: true,
+              title: { display: true, text: 'Employees' },
+              ticks: { stepSize: 1 }
+            },
+            x: {
+              grid: { display: false }
+            }
+          }
+        }
+      });
     }
 
     function formatCostCodeDivision(costCode) {
