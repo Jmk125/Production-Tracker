@@ -29,11 +29,31 @@ if (!fs.existsSync(uploadsDir)) {
   fs.mkdirSync(uploadsDir);
 }
 
-// FIXED: Updated normalization to remove periods, hyphens, and spaces
+// Normalize cost codes to numeric-only strings (drops decimals)
 function normalizeCostCode(value) {
   if (value === undefined || value === null) return null;
-  // Remove periods, hyphens, and spaces for consistent matching
-  return value.toString().replace(/[\.\-\s]/g, '').trim() || null;
+  const [mainPart] = value.toString().split('.');
+  const numeric = mainPart.replace(/\D/g, '').trim();
+  return numeric || null;
+}
+
+// Align budget codes to payroll codes by matching on numeric prefixes
+function alignBudgetCostCodes(budgetHours = {}, actualTotals = {}) {
+  const actualCodes = Object.keys(actualTotals || {});
+  const aligned = {};
+
+  Object.entries(budgetHours || {}).forEach(([budgetCode, hours]) => {
+    if (!budgetCode) return;
+
+    const matchingActual = actualCodes
+      .filter(code => budgetCode.startsWith(code))
+      .sort((a, b) => b.length - a.length)[0];
+
+    const targetCode = matchingActual || budgetCode;
+    aligned[targetCode] = (aligned[targetCode] || 0) + hours;
+  });
+
+  return aligned;
 }
 
 async function buildBudgetComparison(projectId, latestBudget = null) {
@@ -43,13 +63,14 @@ async function buildBudgetComparison(projectId, latestBudget = null) {
   ]);
 
   const budgetHours = latestBudget ? latestBudget.cost_code_hours : (budgetUploads[0]?.cost_code_hours || {});
+  const alignedBudget = alignBudgetCostCodes(budgetHours, actualTotals);
   const allCodes = new Set([
-    ...Object.keys(budgetHours || {}),
+    ...Object.keys(alignedBudget || {}),
     ...Object.keys(actualTotals || {})
   ]);
 
   const comparison = Array.from(allCodes).map(code => {
-    const budget = budgetHours?.[code] || 0;
+    const budget = alignedBudget?.[code] || 0;
     const actual = actualTotals?.[code] || 0;
     const variance = actual - budget;
     const variancePercent = budget > 0 ? (variance / budget) * 100 : null;

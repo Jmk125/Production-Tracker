@@ -1091,11 +1091,12 @@
       document.getElementById(tabName + 'Tab').classList.add('active');
     }
 
-    // FIXED: Updated normalization to remove periods, hyphens, and spaces
+    // Normalize cost codes to numeric-only strings (drops decimals)
     function normalizeCostCodeClient(code) {
       if (code === undefined || code === null) return null;
-      // Remove periods, hyphens, and spaces for consistent matching
-      return code.toString().replace(/[\.\-\s]/g, '').trim() || null;
+      const [mainPart] = code.toString().split('.');
+      const numeric = mainPart.replace(/\D/g, '').trim();
+      return numeric || null;
     }
 
     function formatDate(dateStr) {
