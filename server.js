@@ -5,11 +5,12 @@ const fs = require('fs');
 const cors = require('cors');
 
 const { 
-  initDatabase, 
-  projectQueries, 
-  uploadQueries, 
+  initDatabase,
+  projectQueries,
+  uploadQueries,
+  budgetQueries,
   timeEntryQueries,
-  comparisonQueries 
+  comparisonQueries
 } = require('./database');
 
 const { parsePayrollPDF } = require('./pdfParser');
@@ -26,6 +27,41 @@ app.use(express.static('public'));
 const uploadsDir = path.join(__dirname, 'uploads');
 if (!fs.existsSync(uploadsDir)) {
   fs.mkdirSync(uploadsDir);
+}
+
+function normalizeCostCode(value) {
+  if (value === undefined || value === null) return null;
+  return value.toString().replace(/\./g, '').trim() || null;
+}
+
+async function buildBudgetComparison(projectId, latestBudget = null) {
+  const [budgetUploads, actualTotals] = await Promise.all([
+    budgetQueries.getByProject(projectId),
+    timeEntryQueries.getCostCodeTotals(projectId)
+  ]);
+
+  const budgetHours = latestBudget ? latestBudget.cost_code_hours : (budgetUploads[0]?.cost_code_hours || {});
+  const allCodes = new Set([
+    ...Object.keys(budgetHours || {}),
+    ...Object.keys(actualTotals || {})
+  ]);
+
+  const comparison = Array.from(allCodes).map(code => {
+    const budget = budgetHours?.[code] || 0;
+    const actual = actualTotals?.[code] || 0;
+    const variance = actual - budget;
+    const variancePercent = budget > 0 ? (variance / budget) * 100 : null;
+
+    return {
+      cost_code: code,
+      budget_hours: budget,
+      actual_hours: actual,
+      variance_hours: variance,
+      variance_percent: variancePercent
+    };
+  }).sort((a, b) => a.cost_code.localeCompare(b.cost_code));
+
+  return { comparison, latestBudget: budgetUploads[0] || null, budgetUploads };
 }
 
 // Configure multer for file uploads
@@ -168,6 +204,60 @@ app.post('/api/projects/:id/upload', upload.single('payroll'), async (req, res) 
   } catch (error) {
     console.error('Error uploading payroll:', error);
     res.status(500).json({ error: 'Failed to process payroll file' });
+  }
+});
+
+// Save budget hours (parsed client-side from Excel)
+app.post('/api/projects/:id/budget', async (req, res) => {
+  try {
+    const projectId = req.params.id;
+    const { filename, costCodeHours } = req.body;
+
+    if (!costCodeHours || typeof costCodeHours !== 'object') {
+      return res.status(400).json({ error: 'No budget data provided' });
+    }
+
+    const normalizedHours = {};
+    Object.entries(costCodeHours).forEach(([code, hours]) => {
+      const normalizedCode = normalizeCostCode(code);
+      const numericHours = parseFloat(hours);
+      if (!normalizedCode || !Number.isFinite(numericHours)) return;
+      normalizedHours[normalizedCode] = (normalizedHours[normalizedCode] || 0) + numericHours;
+    });
+
+    if (Object.keys(normalizedHours).length === 0) {
+      return res.status(400).json({ error: 'No valid cost code hours found in upload' });
+    }
+
+    const result = await budgetQueries.create(projectId, filename || 'Budget Upload', normalizedHours);
+    const { comparison, latestBudget, budgetUploads } = await buildBudgetComparison(projectId, { cost_code_hours: normalizedHours });
+
+    res.json({
+      success: true,
+      budgetId: result.lastID,
+      codesTracked: Object.keys(normalizedHours).length,
+      uploads: budgetUploads,
+      latest: latestBudget,
+      comparison
+    });
+  } catch (error) {
+    console.error('Error saving budget:', error);
+    res.status(500).json({ error: 'Failed to save budget upload' });
+  }
+});
+
+// Get budget summary and uploads
+app.get('/api/projects/:id/budget', async (req, res) => {
+  try {
+    const { comparison, latestBudget, budgetUploads } = await buildBudgetComparison(req.params.id);
+    res.json({
+      uploads: budgetUploads,
+      latest: latestBudget,
+      comparison
+    });
+  } catch (error) {
+    console.error('Error fetching budget data:', error);
+    res.status(500).json({ error: 'Failed to fetch budget data' });
   }
 });
 
