@@ -5,6 +5,7 @@ const DATA_DIR = path.join(__dirname, 'data');
 const PROJECTS_FILE = path.join(DATA_DIR, 'projects.json');
 const UPLOADS_FILE = path.join(DATA_DIR, 'uploads.json');
 const ENTRIES_FILE = path.join(DATA_DIR, 'entries.json');
+const BUDGETS_FILE = path.join(DATA_DIR, 'budgets.json');
 
 // Initialize data directory and files
 function initDatabase() {
@@ -22,6 +23,10 @@ function initDatabase() {
 
   if (!fs.existsSync(ENTRIES_FILE)) {
     fs.writeFileSync(ENTRIES_FILE, JSON.stringify([]));
+  }
+
+  if (!fs.existsSync(BUDGETS_FILE)) {
+    fs.writeFileSync(BUDGETS_FILE, JSON.stringify([]));
   }
 
   console.log('Database initialized successfully');
@@ -119,6 +124,36 @@ const uploadQueries = {
     return uploads
       .filter(u => u.project_id === parseInt(project_id))
       .sort((a, b) => new Date(b.upload_date) - new Date(a.upload_date));
+  }
+};
+
+// Budget queries
+const budgetQueries = {
+  create: async (project_id, filename, cost_code_hours) => {
+    const budgets = readJSON(BUDGETS_FILE);
+    const newBudget = {
+      id: budgets.length > 0 ? Math.max(...budgets.map(b => b.id)) + 1 : 1,
+      project_id: parseInt(project_id),
+      filename,
+      cost_code_hours,
+      upload_date: new Date().toISOString()
+    };
+
+    budgets.push(newBudget);
+    writeJSON(BUDGETS_FILE, budgets);
+    return { lastID: newBudget.id };
+  },
+
+  getByProject: async (project_id) => {
+    const budgets = readJSON(BUDGETS_FILE);
+    return budgets
+      .filter(b => b.project_id === parseInt(project_id))
+      .sort((a, b) => new Date(b.upload_date) - new Date(a.upload_date));
+  },
+
+  getLatestByProject: async (project_id) => {
+    const budgets = await budgetQueries.getByProject(project_id);
+    return budgets.length > 0 ? budgets[0] : null;
   }
 };
 
@@ -232,6 +267,21 @@ const timeEntryQueries = {
     });
 
     return Object.values(aggregated).sort((a, b) => a.month.localeCompare(b.month));
+  },
+
+  getCostCodeTotals: async (project_id) => {
+    const entries = readJSON(ENTRIES_FILE);
+    const projectEntries = entries.filter(e => e.project_id === parseInt(project_id));
+
+    const totals = {};
+    projectEntries.forEach(entry => {
+      if (!entry.cost_code) return;
+      const code = entry.cost_code.toString().replace(/\./g, '').trim();
+      if (!code) return;
+      totals[code] = (totals[code] || 0) + entry.hours;
+    });
+
+    return totals;
   }
 };
 
@@ -286,6 +336,7 @@ module.exports = {
   initDatabase,
   projectQueries,
   uploadQueries,
+  budgetQueries,
   timeEntryQueries,
   comparisonQueries
 };
