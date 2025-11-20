@@ -1,12 +1,13 @@
 <!DOCTYPE html>
 <html lang="en">
-<head>
-  <meta charset="UTF-8">
-  <meta name="viewport" content="width=device-width, initial-scale=1.0">
-  <title>Project Details - Payroll Tracker</title>
-  <link rel="stylesheet" href="/style.css">
-  <script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.0"></script>
-</head>
+  <head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Project Details - Payroll Tracker</title>
+    <link rel="stylesheet" href="/style.css">
+    <script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.0"></script>
+    <script src="https://cdn.jsdelivr.net/npm/xlsx@0.18.5/dist/xlsx.full.min.js"></script>
+  </head>
 <body>
   <header>
     <div class="container">
@@ -29,9 +30,10 @@
     </div>
 
     <div class="tabs">
-      <button class="tab active" onclick="switchTab('overview')">Overview</button>
-      <button class="tab" onclick="switchTab('upload')">Upload Payroll</button>
-      <button class="tab" onclick="switchTab('data')">Time Entries</button>
+      <button class="tab active" onclick="switchTab(event, 'overview')">Overview</button>
+      <button class="tab" onclick="switchTab(event, 'upload')">Upload Payroll</button>
+      <button class="tab" onclick="switchTab(event, 'budget')">Budget</button>
+      <button class="tab" onclick="switchTab(event, 'data')">Time Entries</button>
     </div>
 
     <!-- Overview Tab -->
@@ -73,6 +75,22 @@
           </div>
         </div>
       </div>
+
+      <div class="card" style="margin-top: 1.5rem;">
+        <div class="card-header">
+          <h3 class="card-title">Budget Summary</h3>
+          <div id="budgetMeta" style="color: var(--text-secondary); font-size: 0.9rem;">Loading budget...</div>
+        </div>
+        <div id="budgetSummary" style="margin-top: 1rem;">Loading budget...</div>
+        <div class="grid grid-2" style="margin-top: 1.25rem; gap: 1.25rem;">
+          <div class="chart-container" style="min-height: 320px;">
+            <canvas id="budgetVarianceChart" aria-label="Budget variance by hours"></canvas>
+          </div>
+          <div class="chart-container" style="min-height: 320px;">
+            <canvas id="budgetPercentChart" aria-label="Budget variance by percentage"></canvas>
+          </div>
+        </div>
+      </div>
     </div>
 
     <!-- Upload Tab -->
@@ -99,6 +117,49 @@
           <h4 style="margin-bottom: 1rem;">Upload History</h4>
           <div id="uploadHistory"></div>
         </div>
+      </div>
+    </div>
+
+    <!-- Budget Tab -->
+    <div id="budgetTab" class="tab-content">
+      <div class="card">
+        <div class="card-header">
+          <div>
+            <h3 class="card-title" style="margin-bottom: 0.25rem;">Upload Budget Spreadsheet</h3>
+            <p style="color: var(--text-secondary); font-size: 0.9rem;">Upload Excel files with cost codes in the Phase column and hours in column I.</p>
+          </div>
+        </div>
+
+        <div id="budgetUploadArea" class="upload-area">
+          <input type="file" id="budgetFileInput" accept=".xlsx,.xls" style="display: none;" onchange="handleBudgetFileSelect(event)">
+          <p style="font-size: 1.125rem; margin-bottom: 0.5rem;">📊 Drop Excel budget here or click to browse</p>
+          <p style="color: var(--text-secondary); font-size: 0.875rem;">We'll total the hours in column I for each Phase cost code (decimals removed).</p>
+        </div>
+
+        <div id="budgetUploadProgress" style="display: none; margin-top: 1rem;">
+          <div style="display: flex; align-items: center; gap: 0.5rem;">
+            <div class="loading"></div>
+            <span>Processing budget...</span>
+          </div>
+        </div>
+
+        <div id="budgetUploadResult" style="margin-top: 1rem;"></div>
+      </div>
+
+      <div class="card" style="margin-top: 1.25rem;">
+        <div class="card-header">
+          <h3 class="card-title">Budget Versions</h3>
+          <div style="color: var(--text-secondary); font-size: 0.9rem;" id="budgetVersionMeta"></div>
+        </div>
+        <div id="budgetUploadHistory"></div>
+      </div>
+
+      <div class="card" style="margin-top: 1.25rem;">
+        <div class="card-header">
+          <h3 class="card-title">Cost Code Breakdown</h3>
+          <div style="color: var(--text-secondary); font-size: 0.9rem;">Budget vs. time entry hours</div>
+        </div>
+        <div id="budgetBreakdown" style="margin-top: 1rem;"></div>
       </div>
     </div>
 
@@ -141,15 +202,21 @@
     let projectData = null;
     let timeEntries = [];
     let detailedStats = [];
+    let budgetData = null;
+    let budgetComparison = [];
     let hoursChart = null;
     let payClassChart = null;
+    let budgetVarianceChart = null;
+    let budgetPercentChart = null;
 
     document.addEventListener('DOMContentLoaded', async () => {
       await loadProject();
       await loadTimeEntries();
       await loadDetailedStats();
+      await loadBudgetData();
       await loadUploads();
       setupUploadArea();
+      setupBudgetUploadArea();
       updateChart();
       renderSummaryStats();
     });
@@ -188,6 +255,22 @@
         detailedStats = await response.json();
       } catch (error) {
         console.error('Error loading detailed stats:', error);
+      }
+    }
+
+    async function loadBudgetData() {
+      try {
+        const response = await fetch(`/api/projects/${projectId}/budget`);
+        budgetData = await response.json();
+        budgetComparison = budgetData.comparison || [];
+
+        renderBudgetSummary();
+        renderBudgetUploads(budgetData.uploads || []);
+        renderBudgetBreakdown();
+        renderBudgetCharts();
+      } catch (error) {
+        console.error('Error loading budget data:', error);
+        document.getElementById('budgetSummary').textContent = 'Unable to load budget data.';
       }
     }
 
@@ -347,6 +430,218 @@
           </div>
         </div>
       `).join('');
+    }
+
+    function renderBudgetUploads(uploads) {
+      const container = document.getElementById('budgetUploadHistory');
+      const meta = document.getElementById('budgetVersionMeta');
+
+      if (!uploads || uploads.length === 0) {
+        container.innerHTML = '<p style="color: var(--text-secondary);">No budget uploads yet</p>';
+        if (meta) meta.textContent = 'No budget uploads yet';
+        return;
+      }
+
+      if (meta) {
+        const latest = uploads[0];
+        meta.textContent = `Latest: ${escapeHtml(latest.filename)} • ${new Date(latest.upload_date).toLocaleString()} (${uploads.length} total)`;
+      }
+
+      container.innerHTML = uploads.map(upload => `
+        <div class="file-item">
+          <div>
+            <div style="font-weight: 500;">${escapeHtml(upload.filename)}</div>
+            <div style="font-size: 0.813rem; color: var(--text-secondary);">
+              ${new Date(upload.upload_date).toLocaleString()}
+            </div>
+          </div>
+        </div>
+      `).join('');
+    }
+
+    function renderBudgetSummary() {
+      const summaryEl = document.getElementById('budgetSummary');
+      const metaEl = document.getElementById('budgetMeta');
+
+      if (!summaryEl || !metaEl) return;
+
+      if (!budgetData || !budgetData.latest) {
+        metaEl.textContent = 'No budget uploaded yet';
+        summaryEl.innerHTML = '<p style="color: var(--text-secondary);">Upload a budget spreadsheet to compare against time entries.</p>';
+        return;
+      }
+
+      const latest = budgetData.latest;
+      metaEl.textContent = `Latest: ${escapeHtml(latest.filename)} • ${new Date(latest.upload_date).toLocaleString()}`;
+
+      const totalBudgetHours = Object.values(latest.cost_code_hours || {}).reduce((sum, val) => sum + Number(val || 0), 0);
+      const totalActualHours = budgetComparison.reduce((sum, row) => sum + (row.actual_hours || 0), 0);
+      const totalVariance = totalActualHours - totalBudgetHours;
+
+      const mostVariance = [...budgetComparison]
+        .sort((a, b) => Math.abs(b.variance_hours) - Math.abs(a.variance_hours))
+        .slice(0, 8);
+
+      summaryEl.innerHTML = `
+        <div style="display: grid; gap: 1rem;">
+          <div style="display: grid; grid-template-columns: repeat(auto-fit, minmax(160px, 1fr)); gap: 1rem;">
+            <div>
+              <div style="font-size: 1.5rem; font-weight: 700; color: var(--primary-color);">${formatHours(totalBudgetHours)}</div>
+              <div style="color: var(--text-secondary); font-size: 0.9rem;">Budgeted Hours</div>
+            </div>
+            <div>
+              <div style="font-size: 1.5rem; font-weight: 700; color: var(--primary-color);">${formatHours(totalActualHours)}</div>
+              <div style="color: var(--text-secondary); font-size: 0.9rem;">Hours Spent</div>
+            </div>
+            <div>
+              <div style="font-size: 1.5rem; font-weight: 700; color: var(--primary-color);">${formatHours(totalVariance)}</div>
+              <div style="color: var(--text-secondary); font-size: 0.9rem;">Variance (hrs)</div>
+            </div>
+          </div>
+          ${mostVariance.length ? `
+            <div style="overflow-x: auto;">
+              <table style="width: 100%; border-collapse: collapse;">
+                <thead>
+                  <tr style="border-bottom: 2px solid var(--border-color);">
+                    <th style="text-align: left; padding: 0.5rem;">Cost Code</th>
+                    <th style="text-align: right; padding: 0.5rem;">Budget</th>
+                    <th style="text-align: right; padding: 0.5rem;">Spent</th>
+                    <th style="text-align: right; padding: 0.5rem;">Variance</th>
+                    <th style="text-align: right; padding: 0.5rem;">% Variance</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  ${mostVariance.map(row => `
+                    <tr style="border-bottom: 1px solid var(--border-color);">
+                      <td style="padding: 0.5rem; font-weight: 600;">${escapeHtml(row.cost_code)}</td>
+                      <td style="padding: 0.5rem; text-align: right;">${formatHours(row.budget_hours)}</td>
+                      <td style="padding: 0.5rem; text-align: right;">${formatHours(row.actual_hours)}</td>
+                      <td style="padding: 0.5rem; text-align: right;">${formatVarianceBadge(row.variance_hours)}</td>
+                      <td style="padding: 0.5rem; text-align: right;">${formatPercentVariance(row.variance_percent)}</td>
+                    </tr>
+                  `).join('')}
+                </tbody>
+              </table>
+            </div>
+          ` : '<p style="color: var(--text-secondary);">No budget variance to display yet.</p>'}
+        </div>
+      `;
+    }
+
+    function renderBudgetBreakdown() {
+      const container = document.getElementById('budgetBreakdown');
+      if (!container) return;
+
+      if (!budgetData || !budgetData.latest) {
+        container.innerHTML = '<p style="color: var(--text-secondary);">Upload a budget and add time entries to see the breakdown.</p>';
+        return;
+      }
+
+      const rows = [...budgetComparison].sort((a, b) => a.cost_code.localeCompare(b.cost_code));
+
+      container.innerHTML = `
+        <div style="overflow-x: auto;">
+          <table style="width: 100%; border-collapse: collapse;">
+            <thead>
+              <tr style="border-bottom: 2px solid var(--border-color);">
+                <th style="text-align: left; padding: 0.6rem;">Cost Code</th>
+                <th style="text-align: right; padding: 0.6rem;">Budget Hours</th>
+                <th style="text-align: right; padding: 0.6rem;">Hours Spent</th>
+                <th style="text-align: right; padding: 0.6rem;">Variance (hrs)</th>
+                <th style="text-align: right; padding: 0.6rem;">Variance (%)</th>
+              </tr>
+            </thead>
+            <tbody>
+              ${rows.map(row => `
+                <tr style="border-bottom: 1px solid var(--border-color);">
+                  <td style="padding: 0.6rem; font-weight: 600;">${escapeHtml(row.cost_code)}</td>
+                  <td style="padding: 0.6rem; text-align: right;">${formatHours(row.budget_hours)}</td>
+                  <td style="padding: 0.6rem; text-align: right;">${formatHours(row.actual_hours)}</td>
+                  <td style="padding: 0.6rem; text-align: right;">${formatVarianceBadge(row.variance_hours)}</td>
+                  <td style="padding: 0.6rem; text-align: right;">${formatPercentVariance(row.variance_percent)}</td>
+                </tr>
+              `).join('')}
+            </tbody>
+          </table>
+        </div>
+      `;
+    }
+
+    function renderBudgetCharts() {
+      const varianceCanvas = document.getElementById('budgetVarianceChart');
+      const percentCanvas = document.getElementById('budgetPercentChart');
+
+      if (budgetVarianceChart) budgetVarianceChart.destroy();
+      if (budgetPercentChart) budgetPercentChart.destroy();
+
+      if (!budgetData || !budgetData.latest || !budgetComparison.length) return;
+
+      const varianceData = [...budgetComparison]
+        .sort((a, b) => Math.abs(b.variance_hours) - Math.abs(a.variance_hours))
+        .slice(0, 10);
+
+      if (varianceCanvas && varianceData.length) {
+        const labels = varianceData.map(row => row.cost_code);
+        const values = varianceData.map(row => row.variance_hours);
+        const colors = values.map(v => v >= 0 ? 'rgba(239, 68, 68, 0.8)' : 'rgba(34, 197, 94, 0.8)');
+
+        budgetVarianceChart = new Chart(varianceCanvas, {
+          type: 'bar',
+          data: {
+            labels,
+            datasets: [{
+              label: 'Variance (hrs)',
+              data: values,
+              backgroundColor: colors,
+              borderWidth: 0
+            }]
+          },
+          options: {
+            responsive: true,
+            maintainAspectRatio: false,
+            plugins: {
+              legend: { display: false }
+            },
+            scales: {
+              y: { beginAtZero: true, title: { display: true, text: 'Hours' } }
+            }
+          }
+        });
+      }
+
+      const percentData = budgetComparison
+        .filter(row => row.variance_percent !== null && Number.isFinite(row.variance_percent))
+        .sort((a, b) => Math.abs(b.variance_percent) - Math.abs(a.variance_percent))
+        .slice(0, 10);
+
+      if (percentCanvas && percentData.length) {
+        const labels = percentData.map(row => row.cost_code);
+        const values = percentData.map(row => row.variance_percent);
+        const colors = values.map(v => v >= 0 ? 'rgba(239, 68, 68, 0.8)' : 'rgba(34, 197, 94, 0.8)');
+
+        budgetPercentChart = new Chart(percentCanvas, {
+          type: 'bar',
+          data: {
+            labels,
+            datasets: [{
+              label: 'Variance (%)',
+              data: values,
+              backgroundColor: colors,
+              borderWidth: 0
+            }]
+          },
+          options: {
+            responsive: true,
+            maintainAspectRatio: false,
+            plugins: {
+              legend: { display: false }
+            },
+            scales: {
+              y: { beginAtZero: true, title: { display: true, text: 'Percent' } }
+            }
+          }
+        });
+      }
     }
 
     function updateChart() {
@@ -602,6 +897,7 @@
           // Reload data
           await loadTimeEntries();
           await loadDetailedStats();
+          await loadBudgetData();
           await loadUploads();
           updateChart();
           renderSummaryStats();
@@ -625,18 +921,164 @@
       }
     }
 
-    function switchTab(tabName) {
+    function setupBudgetUploadArea() {
+      const uploadArea = document.getElementById('budgetUploadArea');
+      const fileInput = document.getElementById('budgetFileInput');
+
+      if (!uploadArea || !fileInput) return;
+
+      uploadArea.addEventListener('click', () => fileInput.click());
+
+      uploadArea.addEventListener('dragover', (e) => {
+        e.preventDefault();
+        uploadArea.classList.add('dragover');
+      });
+
+      uploadArea.addEventListener('dragleave', () => {
+        uploadArea.classList.remove('dragover');
+      });
+
+      uploadArea.addEventListener('drop', (e) => {
+        e.preventDefault();
+        uploadArea.classList.remove('dragover');
+
+        const files = e.dataTransfer.files;
+        if (files.length > 0 && isExcelFile(files[0])) {
+          uploadBudgetFile(files[0]);
+        } else {
+          alert('Please drop an Excel file (.xlsx or .xls)');
+        }
+      });
+    }
+
+    function handleBudgetFileSelect(event) {
+      const file = event.target.files[0];
+      if (file) {
+        uploadBudgetFile(file);
+      }
+    }
+
+    function isExcelFile(file) {
+      const acceptedTypes = [
+        'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet',
+        'application/vnd.ms-excel'
+      ];
+      return acceptedTypes.includes(file.type) || file.name.endsWith('.xlsx') || file.name.endsWith('.xls');
+    }
+
+    async function uploadBudgetFile(file) {
+      const progressDiv = document.getElementById('budgetUploadProgress');
+      const resultDiv = document.getElementById('budgetUploadResult');
+
+      progressDiv.style.display = 'block';
+      resultDiv.innerHTML = '';
+
+      try {
+        const costCodeHours = await parseBudgetFile(file);
+
+        const response = await fetch(`/api/projects/${projectId}/budget`, {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ filename: file.name, costCodeHours })
+        });
+
+        const result = await response.json();
+        progressDiv.style.display = 'none';
+
+        if (response.ok) {
+          budgetData = result;
+          budgetComparison = result.comparison || [];
+          renderBudgetSummary();
+          renderBudgetUploads(result.uploads || []);
+          renderBudgetBreakdown();
+          renderBudgetCharts();
+
+          resultDiv.innerHTML = `
+            <div class="alert alert-success">
+              ✓ Processed ${result.codesTracked} cost codes from ${escapeHtml(file.name)}
+            </div>
+          `;
+
+          document.getElementById('budgetFileInput').value = '';
+        } else {
+          resultDiv.innerHTML = `
+            <div class="alert alert-error">
+              ✗ Error: ${result.error || 'Failed to save budget'}
+            </div>
+          `;
+        }
+      } catch (error) {
+        progressDiv.style.display = 'none';
+        resultDiv.innerHTML = `
+          <div class="alert alert-error">
+            ✗ Error processing budget: ${error.message}
+          </div>
+        `;
+      }
+    }
+
+    async function parseBudgetFile(file) {
+      if (typeof XLSX === 'undefined') {
+        throw new Error('Spreadsheet parser not available.');
+      }
+
+      const buffer = await file.arrayBuffer();
+      const workbook = XLSX.read(buffer, { type: 'array' });
+      const firstSheet = workbook.SheetNames[0];
+      const sheet = workbook.Sheets[firstSheet];
+      const rows = XLSX.utils.sheet_to_json(sheet, { header: 1, defval: '' });
+
+      if (!rows.length) {
+        throw new Error('The spreadsheet is empty.');
+      }
+
+      const headerRow = rows[0].map(cell => cell.toString().trim().toLowerCase());
+      const phaseIndex = headerRow.findIndex(h => h === 'phase');
+      const hoursIndex = 8; // Column I
+
+      if (phaseIndex === -1) {
+        throw new Error('Could not find a "Phase" column.');
+      }
+
+      const totals = {};
+      for (let i = 1; i < rows.length; i++) {
+        const row = rows[i];
+        if (!row || row.length <= hoursIndex) continue;
+        const rawPhase = row[phaseIndex];
+        const hours = parseFloat(row[hoursIndex]);
+        const normalizedCode = normalizeCostCodeClient(rawPhase);
+
+        if (!normalizedCode || !Number.isFinite(hours)) continue;
+
+        totals[normalizedCode] = (totals[normalizedCode] || 0) + hours;
+      }
+
+      if (Object.keys(totals).length === 0) {
+        throw new Error('No cost codes with hours were found in column I.');
+      }
+
+      return totals;
+    }
+
+    function switchTab(evt, tabName) {
       // Update tab buttons
       document.querySelectorAll('.tab').forEach(tab => {
         tab.classList.remove('active');
       });
-      event.target.classList.add('active');
+      if (evt && evt.target) {
+        evt.target.classList.add('active');
+      }
 
       // Update tab content
       document.querySelectorAll('.tab-content').forEach(content => {
         content.classList.remove('active');
       });
       document.getElementById(tabName + 'Tab').classList.add('active');
+    }
+
+    function normalizeCostCodeClient(code) {
+      if (code === undefined || code === null) return null;
+      return code.toString().replace(/\./g, '').trim() || null;
     }
 
     function formatDate(dateStr) {
@@ -649,6 +1091,22 @@
       const [year, month] = monthStr.split('-');
       const date = new Date(year, month - 1);
       return date.toLocaleDateString('en-US', { month: 'short', year: 'numeric' });
+    }
+
+    function formatHours(value) {
+      return Number(value || 0).toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 });
+    }
+
+    function formatVarianceBadge(value) {
+      const sign = value > 0 ? '+' : '';
+      const color = value > 0 ? '#ef4444' : value < 0 ? '#22c55e' : '#0f172a';
+      return `<span style="font-weight: 700; color: ${color};">${sign}${Number(value || 0).toFixed(2)}</span>`;
+    }
+
+    function formatPercentVariance(value) {
+      if (value === null || value === undefined || Number.isNaN(value)) return '—';
+      const sign = value > 0 ? '+' : '';
+      return `${sign}${value.toFixed(1)}%`;
     }
 
     function escapeHtml(text) {
