@@ -29,9 +29,11 @@ if (!fs.existsSync(uploadsDir)) {
   fs.mkdirSync(uploadsDir);
 }
 
+// FIXED: Updated normalization to remove periods, hyphens, and spaces
 function normalizeCostCode(value) {
   if (value === undefined || value === null) return null;
-  return value.toString().replace(/\./g, '').trim() || null;
+  // Remove periods, hyphens, and spaces for consistent matching
+  return value.toString().replace(/[\.\-\s]/g, '').trim() || null;
 }
 
 async function buildBudgetComparison(projectId, latestBudget = null) {
