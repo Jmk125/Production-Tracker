@@ -1,0 +1,279 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Payroll Tracker - Projects</title>
+  <link rel="stylesheet" href="style.css">
+</head>
+<body>
+  <header>
+    <div class="container">
+      <h1>🏗️ Payroll Tracker</h1>
+      <nav>
+        <a href="/" class="active">Projects</a>
+        <a href="/comparison">Comparison</a>
+      </nav>
+    </div>
+  </header>
+
+  <div class="container">
+    <div class="card">
+      <div class="card-header">
+        <h2 class="card-title">Projects</h2>
+        <button class="btn btn-primary" onclick="openProjectModal()">
+          + Add Project
+        </button>
+      </div>
+
+      <div id="projectsContainer" class="grid grid-2">
+        <!-- Projects will be loaded here -->
+      </div>
+
+      <div id="emptyState" class="empty-state" style="display: none;">
+        <div class="empty-state-icon">📋</div>
+        <h3>No Projects Yet</h3>
+        <p>Create your first project to start tracking payroll data</p>
+        <button class="btn btn-primary" onclick="openProjectModal()" style="margin-top: 1rem;">
+          + Add Project
+        </button>
+      </div>
+    </div>
+  </div>
+
+  <!-- Project Modal -->
+  <div id="projectModal" class="modal">
+    <div class="modal-content">
+      <div class="modal-header">
+        <h2 class="modal-title" id="modalTitle">Add Project</h2>
+        <button class="modal-close" onclick="closeProjectModal()">&times;</button>
+      </div>
+
+      <form id="projectForm" onsubmit="saveProject(event)">
+        <input type="hidden" id="projectId">
+
+        <div class="form-group">
+          <label for="projectName">Project Name *</label>
+          <input type="text" id="projectName" required>
+        </div>
+
+        <div class="form-row">
+          <div class="form-group">
+            <label for="projectSize">Project Size</label>
+            <input type="number" id="projectSize" step="0.01">
+          </div>
+          <div class="form-group">
+            <label for="sizeUnit">Unit</label>
+            <select id="sizeUnit">
+              <option value="SF">Square Feet</option>
+              <option value="units">Units</option>
+              <option value="acres">Acres</option>
+            </select>
+          </div>
+        </div>
+
+        <div class="form-row">
+          <div class="form-group">
+            <label for="startDate">Start Date</label>
+            <input type="date" id="startDate">
+          </div>
+          <div class="form-group">
+            <label for="endDate">End Date</label>
+            <input type="date" id="endDate">
+          </div>
+        </div>
+
+        <div class="form-group">
+          <label for="notes">Notes</label>
+          <textarea id="notes" rows="4"></textarea>
+        </div>
+
+        <div class="form-actions">
+          <button type="button" class="btn btn-secondary" onclick="closeProjectModal()">
+            Cancel
+          </button>
+          <button type="submit" class="btn btn-primary">
+            Save Project
+          </button>
+        </div>
+      </form>
+    </div>
+  </div>
+
+  <script>
+    let projects = [];
+    let editingProjectId = null;
+
+    // Load projects on page load
+    document.addEventListener('DOMContentLoaded', loadProjects);
+
+    async function loadProjects() {
+      try {
+        const response = await fetch('/api/projects');
+        projects = await response.json();
+        renderProjects();
+      } catch (error) {
+        console.error('Error loading projects:', error);
+      }
+    }
+
+    function renderProjects() {
+      const container = document.getElementById('projectsContainer');
+      const emptyState = document.getElementById('emptyState');
+
+      if (projects.length === 0) {
+        container.style.display = 'none';
+        emptyState.style.display = 'block';
+        return;
+      }
+
+      container.style.display = 'grid';
+      emptyState.style.display = 'none';
+
+      container.innerHTML = projects.map(project => `
+        <div class="card project-card" onclick="viewProject(${project.id})">
+          <h3>${escapeHtml(project.name)}</h3>
+          <div class="project-meta">
+            ${project.size ? `<span>📏 ${project.size} ${project.size_unit || ''}</span>` : ''}
+            ${project.start_date ? `<span>📅 ${formatDate(project.start_date)}</span>` : ''}
+          </div>
+          ${project.notes ? `<p style="margin-top: 0.75rem; color: var(--text-secondary); font-size: 0.875rem;">${escapeHtml(project.notes)}</p>` : ''}
+          <div class="project-actions">
+            <button class="btn btn-small btn-primary" onclick="event.stopPropagation(); viewProject(${project.id})">
+              View
+            </button>
+            <button class="btn btn-small btn-secondary" onclick="event.stopPropagation(); editProject(${project.id})">
+              Edit
+            </button>
+            <button class="btn btn-small btn-danger" onclick="event.stopPropagation(); deleteProject(${project.id})">
+              Delete
+            </button>
+          </div>
+        </div>
+      `).join('');
+    }
+
+    function openProjectModal(projectId = null) {
+      const modal = document.getElementById('projectModal');
+      const modalTitle = document.getElementById('modalTitle');
+      const form = document.getElementById('projectForm');
+      
+      form.reset();
+      editingProjectId = projectId;
+
+      if (projectId) {
+        const project = projects.find(p => p.id === projectId);
+        if (project) {
+          modalTitle.textContent = 'Edit Project';
+          document.getElementById('projectId').value = project.id;
+          document.getElementById('projectName').value = project.name;
+          document.getElementById('projectSize').value = project.size || '';
+          document.getElementById('sizeUnit').value = project.size_unit || 'SF';
+          document.getElementById('startDate').value = project.start_date || '';
+          document.getElementById('endDate').value = project.end_date || '';
+          document.getElementById('notes').value = project.notes || '';
+        }
+      } else {
+        modalTitle.textContent = 'Add Project';
+      }
+
+      modal.classList.add('active');
+    }
+
+    function closeProjectModal() {
+      const modal = document.getElementById('projectModal');
+      modal.classList.remove('active');
+      editingProjectId = null;
+    }
+
+    async function saveProject(event) {
+      event.preventDefault();
+
+      const projectData = {
+        name: document.getElementById('projectName').value,
+        size: document.getElementById('projectSize').value || null,
+        size_unit: document.getElementById('sizeUnit').value,
+        start_date: document.getElementById('startDate').value || null,
+        end_date: document.getElementById('endDate').value || null,
+        notes: document.getElementById('notes').value || null
+      };
+
+      try {
+        let response;
+        if (editingProjectId) {
+          response = await fetch(`/api/projects/${editingProjectId}`, {
+            method: 'PUT',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify(projectData)
+          });
+        } else {
+          response = await fetch('/api/projects', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify(projectData)
+          });
+        }
+
+        if (response.ok) {
+          closeProjectModal();
+          loadProjects();
+        } else {
+          alert('Error saving project');
+        }
+      } catch (error) {
+        console.error('Error saving project:', error);
+        alert('Error saving project');
+      }
+    }
+
+    function editProject(projectId) {
+      openProjectModal(projectId);
+    }
+
+    async function deleteProject(projectId) {
+      const project = projects.find(p => p.id === projectId);
+      if (!confirm(`Are you sure you want to delete "${project.name}"? This will delete all associated payroll data.`)) {
+        return;
+      }
+
+      try {
+        const response = await fetch(`/api/projects/${projectId}`, {
+          method: 'DELETE'
+        });
+
+        if (response.ok) {
+          loadProjects();
+        } else {
+          alert('Error deleting project');
+        }
+      } catch (error) {
+        console.error('Error deleting project:', error);
+        alert('Error deleting project');
+      }
+    }
+
+    function viewProject(projectId) {
+      window.location.href = `/project/${projectId}`;
+    }
+
+    function formatDate(dateStr) {
+      if (!dateStr) return '';
+      const date = new Date(dateStr + 'T00:00:00');
+      return date.toLocaleDateString('en-US', { month: 'short', day: 'numeric', year: 'numeric' });
+    }
+
+    function escapeHtml(text) {
+      const div = document.createElement('div');
+      div.textContent = text;
+      return div.innerHTML;
+    }
+
+    // Close modal when clicking outside
+    document.getElementById('projectModal').addEventListener('click', function(e) {
+      if (e.target === this) {
+        closeProjectModal();
+      }
+    });
+  </script>
+</body>
+</html>

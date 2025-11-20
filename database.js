@@ -1,0 +1,291 @@
+const fs = require('fs');
+const path = require('path');
+
+const DATA_DIR = path.join(__dirname, 'data');
+const PROJECTS_FILE = path.join(DATA_DIR, 'projects.json');
+const UPLOADS_FILE = path.join(DATA_DIR, 'uploads.json');
+const ENTRIES_FILE = path.join(DATA_DIR, 'entries.json');
+
+// Initialize data directory and files
+function initDatabase() {
+  if (!fs.existsSync(DATA_DIR)) {
+    fs.mkdirSync(DATA_DIR, { recursive: true });
+  }
+
+  if (!fs.existsSync(PROJECTS_FILE)) {
+    fs.writeFileSync(PROJECTS_FILE, JSON.stringify([]));
+  }
+
+  if (!fs.existsSync(UPLOADS_FILE)) {
+    fs.writeFileSync(UPLOADS_FILE, JSON.stringify([]));
+  }
+
+  if (!fs.existsSync(ENTRIES_FILE)) {
+    fs.writeFileSync(ENTRIES_FILE, JSON.stringify([]));
+  }
+
+  console.log('Database initialized successfully');
+}
+
+// Helper functions to read/write JSON files
+function readJSON(filePath) {
+  const data = fs.readFileSync(filePath, 'utf8');
+  return JSON.parse(data);
+}
+
+function writeJSON(filePath, data) {
+  fs.writeFileSync(filePath, JSON.stringify(data, null, 2));
+}
+
+// Project queries
+const projectQueries = {
+  getAll: async () => {
+    const projects = readJSON(PROJECTS_FILE);
+    return projects.sort((a, b) => new Date(b.created_at) - new Date(a.created_at));
+  },
+
+  getById: async (id) => {
+    const projects = readJSON(PROJECTS_FILE);
+    return projects.find(p => p.id === parseInt(id));
+  },
+
+  create: async (name, size, size_unit, start_date, end_date, notes) => {
+    const projects = readJSON(PROJECTS_FILE);
+    const newProject = {
+      id: projects.length > 0 ? Math.max(...projects.map(p => p.id)) + 1 : 1,
+      name,
+      size,
+      size_unit,
+      start_date,
+      end_date,
+      notes,
+      created_at: new Date().toISOString()
+    };
+    projects.push(newProject);
+    writeJSON(PROJECTS_FILE, projects);
+    return { lastID: newProject.id };
+  },
+
+  update: async (name, size, size_unit, start_date, end_date, notes, id) => {
+    const projects = readJSON(PROJECTS_FILE);
+    const index = projects.findIndex(p => p.id === parseInt(id));
+    if (index !== -1) {
+      projects[index] = {
+        ...projects[index],
+        name,
+        size,
+        size_unit,
+        start_date,
+        end_date,
+        notes
+      };
+      writeJSON(PROJECTS_FILE, projects);
+    }
+  },
+
+  delete: async (id) => {
+    const projects = readJSON(PROJECTS_FILE);
+    const filtered = projects.filter(p => p.id !== parseInt(id));
+    writeJSON(PROJECTS_FILE, filtered);
+
+    // Also delete related uploads and entries
+    const uploads = readJSON(UPLOADS_FILE);
+    const filteredUploads = uploads.filter(u => u.project_id !== parseInt(id));
+    writeJSON(UPLOADS_FILE, filteredUploads);
+
+    const entries = readJSON(ENTRIES_FILE);
+    const filteredEntries = entries.filter(e => e.project_id !== parseInt(id));
+    writeJSON(ENTRIES_FILE, filteredEntries);
+  }
+};
+
+// Upload queries
+const uploadQueries = {
+  create: async (project_id, filename) => {
+    const uploads = readJSON(UPLOADS_FILE);
+    const newUpload = {
+      id: uploads.length > 0 ? Math.max(...uploads.map(u => u.id)) + 1 : 1,
+      project_id: parseInt(project_id),
+      filename,
+      upload_date: new Date().toISOString()
+    };
+    uploads.push(newUpload);
+    writeJSON(UPLOADS_FILE, uploads);
+    return { lastID: newUpload.id };
+  },
+
+  getByProject: async (project_id) => {
+    const uploads = readJSON(UPLOADS_FILE);
+    return uploads
+      .filter(u => u.project_id === parseInt(project_id))
+      .sort((a, b) => new Date(b.upload_date) - new Date(a.upload_date));
+  }
+};
+
+// Time entry queries
+const timeEntryQueries = {
+  create: async (project_id, upload_id, employee_name, pay_id, pay_class, union_local, certified_class, date, hours, rate, cost_code, job_description) => {
+    const entries = readJSON(ENTRIES_FILE);
+    const newEntry = {
+      id: entries.length > 0 ? Math.max(...entries.map(e => e.id)) + 1 : 1,
+      project_id: parseInt(project_id),
+      upload_id,
+      employee_name,
+      pay_id,
+      pay_class,
+      union_local,
+      certified_class,
+      date,
+      hours,
+      rate,
+      cost_code,
+      job_description
+    };
+    entries.push(newEntry);
+    writeJSON(ENTRIES_FILE, entries);
+  },
+
+  createBatch: async (entryDataArray) => {
+    const entries = readJSON(ENTRIES_FILE);
+    let nextId = entries.length > 0 ? Math.max(...entries.map(e => e.id)) + 1 : 1;
+    
+    const newEntries = entryDataArray.map(data => ({
+      id: nextId++,
+      project_id: parseInt(data.project_id),
+      upload_id: data.upload_id,
+      employee_name: data.employee_name,
+      pay_id: data.pay_id,
+      pay_class: data.pay_class,
+      union_local: data.union_local,
+      certified_class: data.certified_class,
+      date: data.date,
+      hours: data.hours,
+      rate: data.rate,
+      cost_code: data.cost_code,
+      job_description: data.job_description
+    }));
+    
+    entries.push(...newEntries);
+    writeJSON(ENTRIES_FILE, entries);
+    return newEntries.length;
+  },
+
+  getByProject: async (project_id) => {
+    const entries = readJSON(ENTRIES_FILE);
+    return entries
+      .filter(e => e.project_id === parseInt(project_id))
+      .sort((a, b) => {
+        const dateCompare = new Date(a.date) - new Date(b.date);
+        if (dateCompare !== 0) return dateCompare;
+        return a.employee_name.localeCompare(b.employee_name);
+      });
+  },
+
+  getMonthlyStats: async (project_id) => {
+    const entries = readJSON(ENTRIES_FILE);
+    const projectEntries = entries.filter(e => e.project_id === parseInt(project_id));
+
+    const monthlyData = {};
+    projectEntries.forEach(entry => {
+      const month = entry.date.substring(0, 7); // YYYY-MM
+      if (!monthlyData[month]) {
+        monthlyData[month] = {
+          total_hours: 0,
+          employees: new Set()
+        };
+      }
+      monthlyData[month].total_hours += entry.hours;
+      monthlyData[month].employees.add(entry.employee_name);
+    });
+
+    return Object.keys(monthlyData)
+      .sort()
+      .map(month => ({
+        month,
+        total_hours: monthlyData[month].total_hours,
+        employee_count: monthlyData[month].employees.size
+      }));
+  },
+
+  getMonthlyByCategory: async (project_id) => {
+    const entries = readJSON(ENTRIES_FILE);
+    const projectEntries = entries.filter(e => e.project_id === parseInt(project_id));
+
+    const result = [];
+    const aggregated = {};
+
+    projectEntries.forEach(entry => {
+      const month = entry.date.substring(0, 7);
+      const key = `${month}|${entry.cost_code}|${entry.pay_class}|${entry.job_description}|${entry.employee_name}`;
+
+      if (!aggregated[key]) {
+        aggregated[key] = {
+          month,
+          cost_code: entry.cost_code,
+          pay_class: entry.pay_class,
+          job_description: entry.job_description,
+          employee_name: entry.employee_name,
+          total_hours: 0
+        };
+      }
+      aggregated[key].total_hours += entry.hours;
+    });
+
+    return Object.values(aggregated).sort((a, b) => a.month.localeCompare(b.month));
+  }
+};
+
+// Comparison queries
+const comparisonQueries = {
+  getProjectTimeline: async (project_id) => {
+    const entries = readJSON(ENTRIES_FILE);
+    const projects = readJSON(PROJECTS_FILE);
+
+    const projectEntries = entries.filter(e => e.project_id === parseInt(project_id));
+    const project = projects.find(p => p.id === parseInt(project_id));
+
+    if (projectEntries.length === 0) {
+      return [];
+    }
+
+    // Find the first date for this project
+    const dates = projectEntries.map(e => new Date(e.date));
+    const firstDate = new Date(Math.min(...dates));
+
+    const result = [];
+    const aggregated = {};
+
+    projectEntries.forEach(entry => {
+      const entryDate = new Date(entry.date);
+      const monthsDiff = Math.floor((entryDate - firstDate) / (30.44 * 24 * 60 * 60 * 1000)) + 1;
+      const calendarMonth = entry.date.substring(0, 7);
+
+      const key = `${calendarMonth}|${monthsDiff}|${entry.cost_code}|${entry.pay_class}|${entry.job_description}|${entry.employee_name}`;
+
+      if (!aggregated[key]) {
+        aggregated[key] = {
+          project_id: parseInt(project_id),
+          project_name: project ? project.name : `Project ${project_id}`,
+          calendar_month: calendarMonth,
+          project_month: monthsDiff,
+          cost_code: entry.cost_code,
+          pay_class: entry.pay_class,
+          job_description: entry.job_description,
+          employee_name: entry.employee_name,
+          total_hours: 0
+        };
+      }
+      aggregated[key].total_hours += entry.hours;
+    });
+
+    return Object.values(aggregated).sort((a, b) => a.project_month - b.project_month);
+  }
+};
+
+module.exports = {
+  initDatabase,
+  projectQueries,
+  uploadQueries,
+  timeEntryQueries,
+  comparisonQueries
+};

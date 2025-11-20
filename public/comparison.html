@@ -1,0 +1,482 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Project Comparison - Payroll Tracker</title>
+  <link rel="stylesheet" href="/style.css">
+  <script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.0"></script>
+</head>
+<body>
+  <header>
+    <div class="container">
+      <h1>🏗️ Payroll Tracker</h1>
+      <nav>
+        <a href="/">Projects</a>
+        <a href="/comparison" class="active">Comparison</a>
+      </nav>
+    </div>
+  </header>
+
+  <div class="container">
+    <div class="card" style="margin-bottom: 1.5rem;">
+      <h2 style="margin-bottom: 1rem;">Project Comparison</h2>
+      <p style="color: var(--text-secondary);">
+        Select multiple projects to compare their labor hours and productivity metrics
+      </p>
+    </div>
+
+    <div class="grid" style="grid-template-columns: 300px 1fr; gap: 1.5rem; align-items: start;">
+      <!-- Project Selector -->
+      <div class="card">
+        <h3 class="card-title" style="margin-bottom: 1rem;">Select Projects</h3>
+        <div id="projectCheckboxes" class="checkbox-group">
+          <p style="color: var(--text-secondary); text-align: center; padding: 1rem;">
+            Loading projects...
+          </p>
+        </div>
+        <button class="btn btn-primary" style="width: 100%; margin-top: 1rem;" onclick="loadComparison()">
+          Compare Selected
+        </button>
+      </div>
+
+      <!-- Comparison View -->
+      <div>
+        <div class="card" style="margin-bottom: 1.5rem;">
+          <div class="card-header">
+            <h3 class="card-title">Timeline Comparison</h3>
+            <div style="display: flex; gap: 1rem;">
+              <select id="timelineType" onchange="updateComparisonChart()">
+                <option value="project">Project Timeline (Month 1, 2, 3...)</option>
+                <option value="calendar">Calendar Timeline</option>
+              </select>
+              <select id="comparisonView" onchange="updateComparisonChart()">
+                <option value="total">Total Hours</option>
+                <option value="costCode">By Cost Code</option>
+                <option value="payClass">By Pay Class</option>
+                <option value="job">By Job/Building</option>
+              </select>
+            </div>
+          </div>
+          <div class="chart-container">
+            <canvas id="comparisonChart"></canvas>
+          </div>
+        </div>
+
+        <div id="metricsComparison" style="display: none;">
+          <div class="card">
+            <h3 class="card-title" style="margin-bottom: 1rem;">Comparative Metrics</h3>
+            <div id="metricsGrid" class="grid grid-2">
+              <!-- Metrics will be populated here -->
+            </div>
+          </div>
+        </div>
+
+        <div id="emptyState" class="empty-state">
+          <div class="empty-state-icon">📊</div>
+          <h3>Select Projects to Compare</h3>
+          <p>Choose 2 or more projects from the list to see comparative analysis</p>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <script>
+    let allProjects = [];
+    let selectedProjects = new Set();
+    let comparisonData = [];
+    let comparisonChart = null;
+
+    document.addEventListener('DOMContentLoaded', loadProjects);
+
+    async function loadProjects() {
+      try {
+        const response = await fetch('/api/projects');
+        allProjects = await response.json();
+        renderProjectCheckboxes();
+      } catch (error) {
+        console.error('Error loading projects:', error);
+      }
+    }
+
+    function renderProjectCheckboxes() {
+      const container = document.getElementById('projectCheckboxes');
+      
+      if (allProjects.length === 0) {
+        container.innerHTML = `
+          <p style="color: var(--text-secondary); text-align: center; padding: 1rem;">
+            No projects available. Create projects first.
+          </p>
+        `;
+        return;
+      }
+
+      container.innerHTML = allProjects.map(project => `
+        <div class="checkbox-item">
+          <input 
+            type="checkbox" 
+            id="project-${project.id}" 
+            value="${project.id}"
+            onchange="toggleProject(${project.id})"
+          >
+          <label for="project-${project.id}">
+            ${escapeHtml(project.name)}
+            ${project.start_date ? `<br><span style="font-size: 0.75rem; color: var(--text-secondary);">${formatDate(project.start_date)}</span>` : ''}
+          </label>
+        </div>
+      `).join('');
+    }
+
+    function toggleProject(projectId) {
+      if (selectedProjects.has(projectId)) {
+        selectedProjects.delete(projectId);
+      } else {
+        selectedProjects.add(projectId);
+      }
+    }
+
+    async function loadComparison() {
+      if (selectedProjects.size === 0) {
+        alert('Please select at least one project');
+        return;
+      }
+
+      try {
+        const response = await fetch('/api/comparison/timeline', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ projectIds: Array.from(selectedProjects) })
+        });
+
+        comparisonData = await response.json();
+        
+        document.getElementById('emptyState').style.display = 'none';
+        document.getElementById('metricsComparison').style.display = 'block';
+        
+        updateComparisonChart();
+        renderMetrics();
+      } catch (error) {
+        console.error('Error loading comparison:', error);
+        alert('Error loading comparison data');
+      }
+    }
+
+    function updateComparisonChart() {
+      const timelineType = document.getElementById('timelineType').value;
+      const viewType = document.getElementById('comparisonView').value;
+      
+      if (comparisonData.length === 0) return;
+
+      const ctx = document.getElementById('comparisonChart');
+      
+      if (comparisonChart) {
+        comparisonChart.destroy();
+      }
+
+      let chartData;
+      
+      if (timelineType === 'project') {
+        chartData = buildProjectTimelineChart(comparisonData, viewType);
+      } else {
+        chartData = buildCalendarTimelineChart(comparisonData, viewType);
+      }
+
+      comparisonChart = new Chart(ctx, {
+        type: 'line',
+        data: chartData,
+        options: {
+          responsive: true,
+          maintainAspectRatio: false,
+          plugins: {
+            legend: {
+              display: true,
+              position: 'top'
+            },
+            tooltip: {
+              mode: 'index',
+              intersect: false
+            }
+          },
+          scales: {
+            x: {
+              grid: {
+                display: true
+              },
+              title: {
+                display: true,
+                text: timelineType === 'project' ? 'Project Month' : 'Calendar Month'
+              }
+            },
+            y: {
+              beginAtZero: true,
+              title: {
+                display: true,
+                text: 'Hours'
+              }
+            }
+          },
+          interaction: {
+            mode: 'nearest',
+            axis: 'x',
+            intersect: false
+          }
+        }
+      });
+    }
+
+    function buildProjectTimelineChart(data, viewType) {
+      const colors = [
+        'rgba(37, 99, 235, 1)',
+        'rgba(34, 197, 94, 1)',
+        'rgba(234, 179, 8, 1)',
+        'rgba(239, 68, 68, 1)',
+        'rgba(168, 85, 247, 1)',
+        'rgba(236, 72, 153, 1)'
+      ];
+
+      // Find max project month across all projects
+      let maxMonth = 0;
+      data.forEach(project => {
+        project.data.forEach(entry => {
+          if (entry.project_month > maxMonth) {
+            maxMonth = entry.project_month;
+          }
+        });
+      });
+
+      const months = Array.from({ length: maxMonth }, (_, i) => i + 1);
+
+      if (viewType === 'total') {
+        const datasets = data.map((project, index) => {
+          const monthlyTotals = {};
+          
+          project.data.forEach(entry => {
+            if (!monthlyTotals[entry.project_month]) {
+              monthlyTotals[entry.project_month] = 0;
+            }
+            monthlyTotals[entry.project_month] += entry.total_hours;
+          });
+
+          return {
+            label: project.data[0]?.project_name || `Project ${project.projectId}`,
+            data: months.map(m => monthlyTotals[m] || 0),
+            borderColor: colors[index % colors.length],
+            backgroundColor: colors[index % colors.length].replace('1)', '0.1)'),
+            borderWidth: 2,
+            tension: 0.1,
+            fill: false
+          };
+        });
+
+        return {
+          labels: months.map(m => `Month ${m}`),
+          datasets
+        };
+      } else {
+        // For category views, show stacked area chart for first selected project
+        const project = data[0];
+        const categories = new Set();
+        const categoryKey = viewType === 'costCode' ? 'cost_code' : 
+                           viewType === 'payClass' ? 'pay_class' : 'job_description';
+
+        project.data.forEach(entry => {
+          if (entry[categoryKey]) {
+            categories.add(entry[categoryKey]);
+          }
+        });
+
+        const datasets = Array.from(categories).map((cat, index) => {
+          const monthlyTotals = {};
+          
+          project.data.forEach(entry => {
+            if (entry[categoryKey] === cat) {
+              if (!monthlyTotals[entry.project_month]) {
+                monthlyTotals[entry.project_month] = 0;
+              }
+              monthlyTotals[entry.project_month] += entry.total_hours;
+            }
+          });
+
+          return {
+            label: cat,
+            data: months.map(m => monthlyTotals[m] || 0),
+            borderColor: colors[index % colors.length],
+            backgroundColor: colors[index % colors.length].replace('1)', '0.3)'),
+            borderWidth: 2,
+            tension: 0.1,
+            fill: true
+          };
+        });
+
+        return {
+          labels: months.map(m => `Month ${m}`),
+          datasets
+        };
+      }
+    }
+
+    function buildCalendarTimelineChart(data, viewType) {
+      const colors = [
+        'rgba(37, 99, 235, 1)',
+        'rgba(34, 197, 94, 1)',
+        'rgba(234, 179, 8, 1)',
+        'rgba(239, 68, 68, 1)',
+        'rgba(168, 85, 247, 1)',
+        'rgba(236, 72, 153, 1)'
+      ];
+
+      // Get all unique calendar months
+      const allMonths = new Set();
+      data.forEach(project => {
+        project.data.forEach(entry => {
+          allMonths.add(entry.calendar_month);
+        });
+      });
+
+      const months = Array.from(allMonths).sort();
+
+      if (viewType === 'total') {
+        const datasets = data.map((project, index) => {
+          const monthlyTotals = {};
+          
+          project.data.forEach(entry => {
+            if (!monthlyTotals[entry.calendar_month]) {
+              monthlyTotals[entry.calendar_month] = 0;
+            }
+            monthlyTotals[entry.calendar_month] += entry.total_hours;
+          });
+
+          return {
+            label: project.data[0]?.project_name || `Project ${project.projectId}`,
+            data: months.map(m => monthlyTotals[m] || 0),
+            borderColor: colors[index % colors.length],
+            backgroundColor: colors[index % colors.length].replace('1)', '0.1)'),
+            borderWidth: 2,
+            tension: 0.1,
+            fill: false
+          };
+        });
+
+        return {
+          labels: months.map(formatMonth),
+          datasets
+        };
+      } else {
+        // For category views, show first selected project
+        const project = data[0];
+        const categories = new Set();
+        const categoryKey = viewType === 'costCode' ? 'cost_code' : 
+                           viewType === 'payClass' ? 'pay_class' : 'job_description';
+
+        project.data.forEach(entry => {
+          if (entry[categoryKey]) {
+            categories.add(entry[categoryKey]);
+          }
+        });
+
+        const datasets = Array.from(categories).map((cat, index) => {
+          const monthlyTotals = {};
+          
+          project.data.forEach(entry => {
+            if (entry[categoryKey] === cat) {
+              if (!monthlyTotals[entry.calendar_month]) {
+                monthlyTotals[entry.calendar_month] = 0;
+              }
+              monthlyTotals[entry.calendar_month] += entry.total_hours;
+            }
+          });
+
+          return {
+            label: cat,
+            data: months.map(m => monthlyTotals[m] || 0),
+            borderColor: colors[index % colors.length],
+            backgroundColor: colors[index % colors.length].replace('1)', '0.3)'),
+            borderWidth: 2,
+            tension: 0.1,
+            fill: true
+          };
+        });
+
+        return {
+          labels: months.map(formatMonth),
+          datasets
+        };
+      }
+    }
+
+    function renderMetrics() {
+      const metricsGrid = document.getElementById('metricsGrid');
+      
+      const metrics = comparisonData.map(project => {
+        const totalHours = project.data.reduce((sum, entry) => sum + entry.total_hours, 0);
+        const uniqueEmployees = new Set(project.data.map(e => e.employee_name)).size;
+        const costCodes = new Set(project.data.map(e => e.cost_code).filter(Boolean)).size;
+        const projectMonths = Math.max(...project.data.map(e => e.project_month));
+        const avgHoursPerMonth = totalHours / projectMonths;
+
+        return {
+          name: project.data[0]?.project_name || `Project ${project.projectId}`,
+          totalHours,
+          uniqueEmployees,
+          costCodes,
+          projectMonths,
+          avgHoursPerMonth
+        };
+      });
+
+      metricsGrid.innerHTML = metrics.map(m => `
+        <div class="card" style="background-color: var(--background);">
+          <h4 style="margin-bottom: 1rem; font-size: 1rem;">${escapeHtml(m.name)}</h4>
+          <div style="display: grid; gap: 0.75rem;">
+            <div>
+              <div style="font-size: 1.5rem; font-weight: 700; color: var(--primary-color);">
+                ${m.totalHours.toLocaleString()}
+              </div>
+              <div style="color: var(--text-secondary); font-size: 0.813rem;">Total Hours</div>
+            </div>
+            <div>
+              <div style="font-size: 1.25rem; font-weight: 600;">
+                ${m.avgHoursPerMonth.toLocaleString(undefined, { maximumFractionDigits: 0 })}
+              </div>
+              <div style="color: var(--text-secondary); font-size: 0.813rem;">Avg Hours/Month</div>
+            </div>
+            <div style="display: flex; justify-content: space-between; padding-top: 0.75rem; border-top: 1px solid var(--border-color);">
+              <div>
+                <div style="font-weight: 600;">${m.uniqueEmployees}</div>
+                <div style="color: var(--text-secondary); font-size: 0.75rem;">Employees</div>
+              </div>
+              <div>
+                <div style="font-weight: 600;">${m.projectMonths}</div>
+                <div style="color: var(--text-secondary); font-size: 0.75rem;">Months</div>
+              </div>
+              <div>
+                <div style="font-weight: 600;">${m.costCodes}</div>
+                <div style="color: var(--text-secondary); font-size: 0.75rem;">Cost Codes</div>
+              </div>
+            </div>
+          </div>
+        </div>
+      `).join('');
+    }
+
+    function formatDate(dateStr) {
+      if (!dateStr) return '';
+      const date = new Date(dateStr + 'T00:00:00');
+      return date.toLocaleDateString('en-US', { month: 'short', day: 'numeric', year: 'numeric' });
+    }
+
+    function formatMonth(monthStr) {
+      const [year, month] = monthStr.split('-');
+      const date = new Date(year, month - 1);
+      return date.toLocaleDateString('en-US', { month: 'short', year: 'numeric' });
+    }
+
+    function escapeHtml(text) {
+      if (!text) return '';
+      const div = document.createElement('div');
+      div.textContent = text;
+      return div.innerHTML;
+    }
+  </script>
+</body>
+</html>
