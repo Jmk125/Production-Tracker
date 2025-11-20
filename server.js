@@ -29,11 +29,12 @@ if (!fs.existsSync(uploadsDir)) {
   fs.mkdirSync(uploadsDir);
 }
 
-// FIXED: Updated normalization to remove periods, hyphens, and spaces
+// Normalize cost codes to numeric-only strings (drops decimals)
 function normalizeCostCode(value) {
   if (value === undefined || value === null) return null;
-  // Remove periods, hyphens, and spaces for consistent matching
-  return value.toString().replace(/[\.\-\s]/g, '').trim() || null;
+  const [mainPart] = value.toString().split('.');
+  const numeric = mainPart.replace(/\D/g, '').trim();
+  return numeric || null;
 }
 
 async function buildBudgetComparison(projectId, latestBudget = null) {

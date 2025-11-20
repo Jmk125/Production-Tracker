@@ -7,6 +7,13 @@ const UPLOADS_FILE = path.join(DATA_DIR, 'uploads.json');
 const ENTRIES_FILE = path.join(DATA_DIR, 'entries.json');
 const BUDGETS_FILE = path.join(DATA_DIR, 'budgets.json');
 
+function normalizeCostCode(value) {
+  if (value === undefined || value === null) return null;
+  const [mainPart] = value.toString().split('.');
+  const numeric = mainPart.replace(/\D/g, '').trim();
+  return numeric || null;
+}
+
 // Initialize data directory and files
 function initDatabase() {
   if (!fs.existsSync(DATA_DIR)) {
@@ -276,7 +283,7 @@ const timeEntryQueries = {
     const totals = {};
     projectEntries.forEach(entry => {
       if (!entry.cost_code) return;
-      const code = entry.cost_code.toString().replace(/\./g, '').trim();
+      const code = normalizeCostCode(entry.cost_code);
       if (!code) return;
       totals[code] = (totals[code] || 0) + entry.hours;
     });
