@@ -53,6 +53,7 @@
               <select id="comparisonView" onchange="updateCharts()">
                 <option value="total">Total Hours</option>
                 <option value="costCode">By Cost Code</option>
+                <option value="costCodeDivision">By Cost Code Division</option>
                 <option value="payClass">By Pay Class</option>
                 <option value="job">By Job/Building</option>
               </select>
@@ -197,13 +198,9 @@
         comparisonChart.destroy();
       }
 
-      let chartData;
-      
-      if (timelineType === 'project') {
-        chartData = buildProjectTimelineChart(comparisonData, viewType);
-      } else {
-        chartData = buildCalendarTimelineChart(comparisonData, viewType);
-      }
+      const chartData = timelineType === 'project'
+        ? buildProjectTimelineChart(comparisonData, viewType)
+        : buildCalendarTimelineChart(comparisonData, viewType);
 
       comparisonChart = new Chart(ctx, {
         type: 'line',
@@ -314,72 +311,19 @@
       const months = Array.from({ length: maxMonth }, (_, i) => i + 1);
 
       if (viewType === 'total') {
-        const datasets = data.map((project, index) => {
-          const monthlyTotals = {};
-          
-          project.data.forEach(entry => {
-            if (!monthlyTotals[entry.project_month]) {
-              monthlyTotals[entry.project_month] = 0;
-            }
-            monthlyTotals[entry.project_month] += entry.total_hours;
-          });
-
-          return {
-            label: project.data[0]?.project_name || `Project ${project.projectId}`,
-            data: months.map(m => monthlyTotals[m] || 0),
-            borderColor: chartColors[index % chartColors.length],
-            backgroundColor: chartColors[index % chartColors.length].replace('1)', '0.1)'),
-            borderWidth: 2,
-            tension: 0.1,
-            fill: false
-          };
-        });
-
-        return {
-          labels: months.map(m => `Month ${m}`),
-          datasets
-        };
-      } else {
-        // For category views, show stacked area chart for first selected project
-        const project = data[0];
-        const categories = new Set();
-        const categoryKey = viewType === 'costCode' ? 'cost_code' : 
-                           viewType === 'payClass' ? 'pay_class' : 'job_description';
-
-        project.data.forEach(entry => {
-          if (entry[categoryKey]) {
-            categories.add(entry[categoryKey]);
-          }
-        });
-
-        const datasets = Array.from(categories).map((cat, index) => {
-          const monthlyTotals = {};
-          
-          project.data.forEach(entry => {
-            if (entry[categoryKey] === cat) {
-              if (!monthlyTotals[entry.project_month]) {
-                monthlyTotals[entry.project_month] = 0;
-              }
-              monthlyTotals[entry.project_month] += entry.total_hours;
-            }
-          });
-
-          return {
-            label: cat,
-            data: months.map(m => monthlyTotals[m] || 0),
-            borderColor: chartColors[index % chartColors.length],
-            backgroundColor: chartColors[index % chartColors.length].replace('1)', '0.3)'),
-            borderWidth: 2,
-            tension: 0.1,
-            fill: true
-          };
-        });
+        const datasets = data.map((project, index) => buildTotalDataset(project, months, 'project_month', index));
 
         return {
           labels: months.map(m => `Month ${m}`),
           datasets
         };
       }
+
+      const categoryDatasets = buildCategoryDatasets(data, months, 'project_month', viewType);
+      return {
+        labels: months.map(m => `Month ${m}`),
+        datasets: categoryDatasets
+      };
     }
 
     function buildCalendarTimelineChart(data, viewType) {
@@ -394,72 +338,19 @@
       const months = Array.from(allMonths).sort();
 
       if (viewType === 'total') {
-        const datasets = data.map((project, index) => {
-          const monthlyTotals = {};
-          
-          project.data.forEach(entry => {
-            if (!monthlyTotals[entry.calendar_month]) {
-              monthlyTotals[entry.calendar_month] = 0;
-            }
-            monthlyTotals[entry.calendar_month] += entry.total_hours;
-          });
-
-          return {
-            label: project.data[0]?.project_name || `Project ${project.projectId}`,
-            data: months.map(m => monthlyTotals[m] || 0),
-            borderColor: chartColors[index % chartColors.length],
-            backgroundColor: chartColors[index % chartColors.length].replace('1)', '0.1)'),
-            borderWidth: 2,
-            tension: 0.1,
-            fill: false
-          };
-        });
-
-        return {
-          labels: months.map(formatMonth),
-          datasets
-        };
-      } else {
-        // For category views, show first selected project
-        const project = data[0];
-        const categories = new Set();
-        const categoryKey = viewType === 'costCode' ? 'cost_code' : 
-                           viewType === 'payClass' ? 'pay_class' : 'job_description';
-
-        project.data.forEach(entry => {
-          if (entry[categoryKey]) {
-            categories.add(entry[categoryKey]);
-          }
-        });
-
-        const datasets = Array.from(categories).map((cat, index) => {
-          const monthlyTotals = {};
-          
-          project.data.forEach(entry => {
-            if (entry[categoryKey] === cat) {
-              if (!monthlyTotals[entry.calendar_month]) {
-                monthlyTotals[entry.calendar_month] = 0;
-              }
-              monthlyTotals[entry.calendar_month] += entry.total_hours;
-            }
-          });
-
-          return {
-            label: cat,
-            data: months.map(m => monthlyTotals[m] || 0),
-            borderColor: chartColors[index % chartColors.length],
-            backgroundColor: chartColors[index % chartColors.length].replace('1)', '0.3)'),
-            borderWidth: 2,
-            tension: 0.1,
-            fill: true
-          };
-        });
+        const datasets = data.map((project, index) => buildTotalDataset(project, months, 'calendar_month', index));
 
         return {
           labels: months.map(formatMonth),
           datasets
         };
       }
+
+      const categoryDatasets = buildCategoryDatasets(data, months, 'calendar_month', viewType);
+      return {
+        labels: months.map(formatMonth),
+        datasets: categoryDatasets
+      };
     }
 
     function buildEmployeeChartData(data, timelineType) {
@@ -607,6 +498,90 @@
       const [year, month] = monthStr.split('-');
       const date = new Date(year, month - 1);
       return date.toLocaleDateString('en-US', { month: 'short', year: 'numeric' });
+    }
+
+    function buildTotalDataset(project, months, monthKey, colorIndex) {
+      const monthlyTotals = {};
+
+      project.data.forEach(entry => {
+        const month = entry[monthKey];
+        if (!monthlyTotals[month]) {
+          monthlyTotals[month] = 0;
+        }
+        monthlyTotals[month] += entry.total_hours;
+      });
+
+      const color = getColor(colorIndex);
+
+      return {
+        label: project.data[0]?.project_name || `Project ${project.projectId}`,
+        data: months.map(m => monthlyTotals[m] || 0),
+        borderColor: color,
+        backgroundColor: color.replace('1)', '0.1)'),
+        borderWidth: 2,
+        tension: 0.1,
+        fill: false
+      };
+    }
+
+    function buildCategoryDatasets(data, months, monthKey, viewType) {
+      const datasets = [];
+
+      data.forEach((project, projectIndex) => {
+        const categoryTotals = {};
+        project.data.forEach(entry => {
+          const category = getCategoryLabel(viewType, entry);
+          if (!category) return;
+
+          const key = `${project.projectId}|${category}`;
+          if (!categoryTotals[key]) {
+            categoryTotals[key] = {
+              projectName: project.data[0]?.project_name || `Project ${project.projectId}`,
+              category,
+              totals: {}
+            };
+          }
+
+          const month = entry[monthKey];
+          categoryTotals[key].totals[month] = (categoryTotals[key].totals[month] || 0) + entry.total_hours;
+        });
+
+        Object.values(categoryTotals).forEach((catData, catIndex) => {
+          const color = getColor(projectIndex + catIndex);
+          datasets.push({
+            label: `${catData.projectName} - ${catData.category}`,
+            data: months.map(m => catData.totals[m] || 0),
+            borderColor: color,
+            backgroundColor: color.replace('1)', '0.25)'),
+            borderWidth: 2,
+            tension: 0.1,
+            fill: true
+          });
+        });
+      });
+
+      return datasets;
+    }
+
+    function getCategoryLabel(viewType, entry) {
+      if (viewType === 'costCode') return entry.cost_code;
+      if (viewType === 'costCodeDivision') return formatCostCodeDivision(entry.cost_code);
+      if (viewType === 'payClass') return entry.pay_class;
+      if (viewType === 'job') return entry.job_description;
+      return null;
+    }
+
+    function formatCostCodeDivision(costCode) {
+      if (!costCode) return 'Unknown';
+      const trimmed = costCode.toString().trim();
+      if (trimmed.length < 2) return trimmed || 'Unknown';
+      return `${trimmed.slice(0, 2)} Division`;
+    }
+
+    function getColor(index) {
+      if (index < chartColors.length) return chartColors[index];
+      const hue = (index * 47) % 360;
+      return `hsla(${hue}, 65%, 50%, 1)`;
     }
 
     function escapeHtml(text) {
