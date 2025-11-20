@@ -664,7 +664,11 @@
       const viewType = document.getElementById('viewType').value;
       const stacked = document.getElementById('stackToggle').checked;
       const ctx = document.getElementById('hoursChart');
-      
+
+      const hiddenStates = hoursChart
+        ? hoursChart.data.datasets.map((ds, index) => ({ label: ds.label ?? index, hidden: ds.hidden }))
+        : [];
+
       if (hoursChart) {
         hoursChart.destroy();
       }
@@ -718,6 +722,17 @@
           }
         }
       });
+
+      if (hiddenStates.length) {
+        const hiddenMap = new Map(hiddenStates.map(state => [state.label, state.hidden]));
+        hoursChart.data.datasets.forEach((dataset, index) => {
+          const key = dataset.label ?? index;
+          if (hiddenMap.has(key)) {
+            dataset.hidden = hiddenMap.get(key);
+          }
+        });
+        hoursChart.update();
+      }
     }
 
     function aggregateByMonth(data) {
