@@ -1121,7 +1121,10 @@
       }
 
       const labels = monthlyStats.map(stat => formatMonth(stat.month));
-      const counts = monthlyStats.map(stat => metric === 'average' ? stat.average_daily_employees : stat.employee_count);
+      const counts = monthlyStats.map(stat => {
+        const value = metric === 'average' ? stat.average_daily_employees : stat.employee_count;
+        return typeof value === 'number' ? value : Number(value) || 0;
+      });
 
       if (subtitle) {
         subtitle.textContent = metric === 'average'

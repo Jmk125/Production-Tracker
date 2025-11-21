@@ -250,7 +250,7 @@ const timeEntryQueries = {
       .sort()
       .map(month => {
         const dayEmployeeCounts = Object.values(monthlyData[month].days).map(set => set.size);
-        const averageDailyEmployees = dayEmployeeCounts.length > 0
+        const averageDailyEmployeesRaw = dayEmployeeCounts.length > 0
           ? dayEmployeeCounts.reduce((sum, count) => sum + count, 0) / dayEmployeeCounts.length
           : 0;
 
@@ -258,7 +258,7 @@ const timeEntryQueries = {
           month,
           total_hours: monthlyData[month].total_hours,
           employee_count: monthlyData[month].employees.size,
-          average_daily_employees: averageDailyEmployees
+          average_daily_employees: Number(averageDailyEmployeesRaw.toFixed(2))
         };
       });
   },
@@ -376,13 +376,13 @@ const comparisonQueries = {
 
     const buildEmployeeStats = (statMap) => Object.entries(statMap).reduce((acc, [key, value]) => {
       const dayCounts = Object.values(value.days).map(set => set.size);
-      const averageDailyEmployees = dayCounts.length > 0
+      const averageDailyEmployeesRaw = dayCounts.length > 0
         ? dayCounts.reduce((sum, count) => sum + count, 0) / dayCounts.length
         : 0;
 
       acc[key] = {
         uniqueEmployees: value.unique.size,
-        averageDailyEmployees
+        averageDailyEmployees: Number(averageDailyEmployeesRaw.toFixed(2))
       };
       return acc;
     }, {});
