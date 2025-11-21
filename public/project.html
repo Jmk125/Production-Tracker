@@ -117,6 +117,9 @@
               <option value="unique" selected>Unique employees</option>
               <option value="average">Average daily crew size</option>
             </select>
+            <label style="display: inline-flex; align-items: center; gap: 0.35rem; font-size: 0.9rem; color: var(--text-secondary);">
+              <input type="checkbox" id="employeeApplyFiltersToggle" onchange="renderEmployeeChart()"> Apply monthly hours filters
+            </label>
           </div>
         </div>
         <div class="chart-container" style="min-height: 320px;">
@@ -609,6 +612,42 @@
       return data.filter(entry => selectedJobs.has(normalizeJobLabel(entry.job_description)));
     }
 
+    function buildMonthlyEmployeeStats(entries) {
+      if (!entries || !entries.length) return [];
+
+      const monthlyMap = {};
+
+      entries.forEach(entry => {
+        const month = entry.date.substring(0, 7);
+
+        if (!monthlyMap[month]) {
+          monthlyMap[month] = { unique: new Set(), days: {} };
+        }
+
+        monthlyMap[month].unique.add(entry.employee_name);
+
+        if (!monthlyMap[month].days[entry.date]) {
+          monthlyMap[month].days[entry.date] = new Set();
+        }
+        monthlyMap[month].days[entry.date].add(entry.employee_name);
+      });
+
+      return Object.keys(monthlyMap)
+        .sort()
+        .map(month => {
+          const dayCounts = Object.values(monthlyMap[month].days).map(set => set.size);
+          const averageDailyEmployeesRaw = dayCounts.length
+            ? dayCounts.reduce((sum, count) => sum + count, 0) / dayCounts.length
+            : 0;
+
+          return {
+            month,
+            employee_count: monthlyMap[month].unique.size,
+            average_daily_employees: Number(averageDailyEmployeesRaw.toFixed(2))
+          };
+        });
+    }
+
     function normalizeCostCodeLabel(code) {
       if (code === null || code === undefined) return 'Unknown';
       const normalized = code.toString().trim();
@@ -977,9 +1016,7 @@
 
       toggleFilterPanelVisibility(true);
 
-      const baseData = applyFilters
-        ? filterBySelectedJobs(filterBySelectedCostCodes(detailedStats))
-        : detailedStats;
+      const baseData = filterBySelectedJobs(filterBySelectedCostCodes(detailedStats));
 
       const hiddenStates = hoursChart
         ? hoursChart.data.datasets.map((ds, index) => ({ label: ds.label ?? index, hidden: ds.hidden }))
@@ -1049,6 +1086,8 @@
         });
         hoursChart.update();
       }
+
+      renderEmployeeChart();
     }
 
     function aggregateByMonth(data) {
@@ -1116,8 +1155,17 @@
 
       const metric = document.getElementById('employeeMetric')?.value || 'unique';
       const subtitle = document.getElementById('employeeChartSubtitle');
+      const applyFilters = document.getElementById('employeeApplyFiltersToggle')?.checked;
 
-      if (!monthlyStats || monthlyStats.length === 0) {
+      const stats = applyFilters
+        ? buildMonthlyEmployeeStats(filterBySelectedJobs(filterBySelectedCostCodes(timeEntries)))
+        : (monthlyStats || []).map(stat => ({
+            month: stat.month,
+            employee_count: Number(stat.employee_count) || 0,
+            average_daily_employees: Number(stat.average_daily_employees) || 0
+          }));
+
+      if (!stats || stats.length === 0) {
         canvas.parentElement.innerHTML = '<p style="color: var(--text-secondary); text-align: center; padding: 2rem;">No employee data yet.</p>';
         return;
       }
@@ -1126,11 +1174,8 @@
         employeeChart.destroy();
       }
 
-      const labels = monthlyStats.map(stat => formatMonth(stat.month));
-      const counts = monthlyStats.map(stat => {
-        const value = metric === 'average' ? stat.average_daily_employees : stat.employee_count;
-        return typeof value === 'number' ? value : Number(value) || 0;
-      });
+      const labels = stats.map(stat => formatMonth(stat.month));
+      const counts = stats.map(stat => metric === 'average' ? stat.average_daily_employees : stat.employee_count);
 
       if (subtitle) {
         subtitle.textContent = metric === 'average'
