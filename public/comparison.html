@@ -68,9 +68,18 @@
         </div>
 
         <div class="card" style="margin-bottom: 1.5rem;">
-          <div class="card-header">
-            <h3 class="card-title">Monthly Employees</h3>
-            <div style="color: var(--text-secondary); font-size: 0.9rem;">Unique employees working each month</div>
+          <div class="card-header" style="align-items: flex-start;">
+            <div>
+              <h3 class="card-title">Monthly Employees</h3>
+              <div id="employeeComparisonSubtitle" style="color: var(--text-secondary); font-size: 0.9rem;">Unique employees working each month</div>
+            </div>
+            <div class="chart-controls">
+              <label for="employeeComparisonMetric" style="font-size: 0.9rem; color: var(--text-secondary);">View</label>
+              <select id="employeeComparisonMetric" onchange="updateEmployeeChart()">
+                <option value="unique" selected>Unique employees</option>
+                <option value="average">Average daily crew size</option>
+              </select>
+            </div>
           </div>
           <div class="chart-container" style="min-height: 360px;">
             <canvas id="employeeComparisonChart"></canvas>
@@ -251,6 +260,8 @@
 
     function updateEmployeeChart() {
       const timelineType = document.getElementById('timelineType').value;
+      const metric = document.getElementById('employeeComparisonMetric')?.value || 'unique';
+      const subtitle = document.getElementById('employeeComparisonSubtitle');
 
       if (comparisonData.length === 0) return;
 
@@ -260,7 +271,13 @@
         employeeComparisonChart.destroy();
       }
 
-      const chartData = buildEmployeeChartData(comparisonData, timelineType);
+      const chartData = buildEmployeeChartData(comparisonData, timelineType, metric);
+
+      if (subtitle) {
+        subtitle.textContent = metric === 'average'
+          ? 'Average daily crew size per month'
+          : 'Unique employees working each month';
+      }
 
       employeeComparisonChart = new Chart(ctx, {
         type: 'line',
@@ -373,7 +390,7 @@
       };
     }
 
-    function buildEmployeeChartData(data, timelineType) {
+    function buildEmployeeChartData(data, timelineType, metric = 'unique') {
       if (timelineType === 'project') {
         let maxMonth = 0;
         data.forEach(project => {
@@ -387,18 +404,14 @@
         const months = Array.from({ length: maxMonth }, (_, i) => i + 1);
 
         const datasets = data.map((project, index) => {
-          const monthlyEmployees = {};
-
-          project.data.forEach(entry => {
-            if (!monthlyEmployees[entry.project_month]) {
-              monthlyEmployees[entry.project_month] = new Set();
-            }
-            monthlyEmployees[entry.project_month].add(entry.employee_name);
-          });
+          const monthlyEmployees = project.employeeStats?.projectTimeline || {};
 
           return {
             label: project.data[0]?.project_name || `Project ${project.projectId}`,
-            data: months.map(m => (monthlyEmployees[m] ? monthlyEmployees[m].size : 0)),
+            data: months.map(m => {
+              const stats = monthlyEmployees[m] || {};
+              return metric === 'average' ? stats.averageDailyEmployees || 0 : stats.uniqueEmployees || 0;
+            }),
             borderColor: chartColors[index % chartColors.length],
             backgroundColor: chartColors[index % chartColors.length].replace('1)', '0.15)'),
             borderWidth: 2,
@@ -425,18 +438,14 @@
       const months = Array.from(allMonths).sort();
 
       const datasets = data.map((project, index) => {
-        const monthlyEmployees = {};
-
-        project.data.forEach(entry => {
-          if (!monthlyEmployees[entry.calendar_month]) {
-            monthlyEmployees[entry.calendar_month] = new Set();
-          }
-          monthlyEmployees[entry.calendar_month].add(entry.employee_name);
-        });
+        const monthlyEmployees = project.employeeStats?.calendarTimeline || {};
 
         return {
           label: project.data[0]?.project_name || `Project ${project.projectId}`,
-          data: months.map(m => (monthlyEmployees[m] ? monthlyEmployees[m].size : 0)),
+          data: months.map(m => {
+            const stats = monthlyEmployees[m] || {};
+            return metric === 'average' ? stats.averageDailyEmployees || 0 : stats.uniqueEmployees || 0;
+          }),
           borderColor: chartColors[index % chartColors.length],
           backgroundColor: chartColors[index % chartColors.length].replace('1)', '0.15)'),
           borderWidth: 2,
