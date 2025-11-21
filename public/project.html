@@ -344,7 +344,7 @@
 
       renderCostCodeList();
       updateCostCodeMasterCheckboxes();
-      toggleCostCodeFilterVisibility(document.getElementById('viewType').value === 'costCode' || document.getElementById('viewType').value === 'costCodeDivision');
+      toggleCostCodeFilterVisibility(true);
     }
 
     function renderCostCodeList() {
@@ -376,7 +376,7 @@
       });
     }
 
-    function toggleCostCodeFilterVisibility(show) {
+    function toggleCostCodeFilterVisibility(show = true) {
       const container = document.getElementById('costCodeFilters');
       if (!container) return;
 
@@ -821,10 +821,9 @@
       const stacked = document.getElementById('stackToggle').checked;
       const ctx = document.getElementById('hoursChart');
 
-      const usingCostCodes = viewType === 'costCode' || viewType === 'costCodeDivision';
-      toggleCostCodeFilterVisibility(usingCostCodes);
+      toggleCostCodeFilterVisibility(true);
 
-      const dataSource = usingCostCodes ? filterBySelectedCostCodes(detailedStats) : detailedStats;
+      const dataSource = filterBySelectedCostCodes(detailedStats);
 
       const hiddenStates = hoursChart
         ? hoursChart.data.datasets.map((ds, index) => ({ label: ds.label ?? index, hidden: ds.hidden }))
@@ -837,17 +836,17 @@
       let chartData;
 
       if (viewType === 'total') {
-        chartData = aggregateByMonth(detailedStats);
+        chartData = aggregateByMonth(dataSource);
       } else if (viewType === 'costCode') {
         chartData = aggregateByCategory(dataSource, 'cost_code');
       } else if (viewType === 'costCodeDivision') {
         chartData = aggregateByCategory(dataSource, 'cost_code', formatCostCodeDivision);
       } else if (viewType === 'payClass') {
-        chartData = aggregateByCategory(detailedStats, 'pay_class');
+        chartData = aggregateByCategory(dataSource, 'pay_class');
       } else if (viewType === 'job') {
-        chartData = aggregateByCategory(detailedStats, 'job_description');
+        chartData = aggregateByCategory(dataSource, 'job_description');
       } else if (viewType === 'employee') {
-        chartData = aggregateByCategory(detailedStats, 'employee_name');
+        chartData = aggregateByCategory(dataSource, 'employee_name');
       }
 
       hoursChart = new Chart(ctx, {
