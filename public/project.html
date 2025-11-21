@@ -103,12 +103,27 @@
       </div>
 
       <div class="card" style="margin-top: 1.5rem;">
-        <div class="card-header">
-          <h3 class="card-title">Monthly Employees</h3>
-          <div style="color: var(--text-secondary); font-size: 0.9rem;">Unique employees working each month</div>
+        <div class="card-header" style="align-items: flex-start;">
+          <div>
+            <h3 class="card-title">Monthly Employees</h3>
+            <div id="employeeChartSubtitle" style="color: var(--text-secondary); font-size: 0.9rem;">Unique employees working each month</div>
+          </div>
+          <div class="chart-controls">
+            <label for="employeeMetric" style="font-size: 0.9rem; color: var(--text-secondary);">View</label>
+            <select id="employeeMetric" onchange="renderEmployeeChart()">
+              <option value="unique" selected>Unique employees</option>
+              <option value="average">Average daily crew size</option>
+            </select>
+            <label style="display: inline-flex; align-items: center; gap: 0.35rem; font-size: 0.9rem; color: var(--text-secondary);">
+              <input type="checkbox" id="employeeApplyFiltersToggle" onchange="renderEmployeeChart()"> Apply monthly hours filters
+            </label>
+          </div>
         </div>
         <div class="chart-container" style="min-height: 320px;">
           <canvas id="employeeChart" aria-label="Employees per month"></canvas>
+          <div id="employeeChartEmptyState" style="display: none; color: var(--text-secondary); text-align: center; padding: 2rem;">
+            No employee data yet.
+          </div>
         </div>
       </div>
 
@@ -597,6 +612,42 @@
       return data.filter(entry => selectedJobs.has(normalizeJobLabel(entry.job_description)));
     }
 
+    function buildMonthlyEmployeeStats(entries) {
+      if (!entries || !entries.length) return [];
+
+      const monthlyMap = {};
+
+      entries.forEach(entry => {
+        const month = entry.date.substring(0, 7);
+
+        if (!monthlyMap[month]) {
+          monthlyMap[month] = { unique: new Set(), days: {} };
+        }
+
+        monthlyMap[month].unique.add(entry.employee_name);
+
+        if (!monthlyMap[month].days[entry.date]) {
+          monthlyMap[month].days[entry.date] = new Set();
+        }
+        monthlyMap[month].days[entry.date].add(entry.employee_name);
+      });
+
+      return Object.keys(monthlyMap)
+        .sort()
+        .map(month => {
+          const dayCounts = Object.values(monthlyMap[month].days).map(set => set.size);
+          const averageDailyEmployeesRaw = dayCounts.length
+            ? dayCounts.reduce((sum, count) => sum + count, 0) / dayCounts.length
+            : 0;
+
+          return {
+            month,
+            employee_count: monthlyMap[month].unique.size,
+            average_daily_employees: Number(averageDailyEmployeesRaw.toFixed(2))
+          };
+        });
+    }
+
     function normalizeCostCodeLabel(code) {
       if (code === null || code === undefined) return 'Unknown';
       const normalized = code.toString().trim();
@@ -964,7 +1015,7 @@
 
       toggleFilterPanelVisibility(true);
 
-      const dataSource = filterBySelectedJobs(filterBySelectedCostCodes(detailedStats));
+      const baseData = filterBySelectedJobs(filterBySelectedCostCodes(detailedStats));
 
       const hiddenStates = hoursChart
         ? hoursChart.data.datasets.map((ds, index) => ({ label: ds.label ?? index, hidden: ds.hidden }))
@@ -977,17 +1028,17 @@
       let chartData;
 
       if (viewType === 'total') {
-        chartData = aggregateByMonth(dataSource);
+        chartData = aggregateByMonth(baseData);
       } else if (viewType === 'costCode') {
-        chartData = aggregateByCategory(dataSource, 'cost_code');
+        chartData = aggregateByCategory(baseData, 'cost_code');
       } else if (viewType === 'costCodeDivision') {
-        chartData = aggregateByCategory(dataSource, 'cost_code', formatCostCodeDivision);
+        chartData = aggregateByCategory(baseData, 'cost_code', formatCostCodeDivision);
       } else if (viewType === 'payClass') {
-        chartData = aggregateByCategory(dataSource, 'pay_class');
+        chartData = aggregateByCategory(baseData, 'pay_class');
       } else if (viewType === 'job') {
-        chartData = aggregateByCategory(dataSource, 'job_description');
+        chartData = aggregateByCategory(baseData, 'job_description');
       } else if (viewType === 'employee') {
-        chartData = aggregateByCategory(dataSource, 'employee_name');
+        chartData = aggregateByCategory(baseData, 'employee_name');
       }
 
       hoursChart = new Chart(ctx, {
@@ -1034,6 +1085,8 @@
         });
         hoursChart.update();
       }
+
+      renderEmployeeChart();
     }
 
     function aggregateByMonth(data) {
@@ -1099,24 +1152,55 @@
       const canvas = document.getElementById('employeeChart');
       if (!canvas) return;
 
-      if (!monthlyStats || monthlyStats.length === 0) {
-        canvas.parentElement.innerHTML = '<p style="color: var(--text-secondary); text-align: center; padding: 2rem;">No employee data yet.</p>';
+      const metric = document.getElementById('employeeMetric')?.value || 'unique';
+      const subtitle = document.getElementById('employeeChartSubtitle');
+      const applyFilters = document.getElementById('employeeApplyFiltersToggle')?.checked;
+      const emptyState = document.getElementById('employeeChartEmptyState');
+
+      const stats = applyFilters
+        ? buildMonthlyEmployeeStats(filterBySelectedJobs(filterBySelectedCostCodes(timeEntries)))
+        : (monthlyStats || []).map(stat => ({
+            month: stat.month,
+            employee_count: Number(stat.employee_count) || 0,
+            average_daily_employees: Number(stat.average_daily_employees) || 0
+          }));
+
+      if (!stats || stats.length === 0) {
+        if (employeeChart) {
+          employeeChart.destroy();
+          employeeChart = null;
+        }
+        canvas.style.display = 'none';
+        if (emptyState) {
+          emptyState.style.display = 'block';
+        }
         return;
+      }
+
+      canvas.style.display = 'block';
+      if (emptyState) {
+        emptyState.style.display = 'none';
       }
 
       if (employeeChart) {
         employeeChart.destroy();
       }
 
-      const labels = monthlyStats.map(stat => formatMonth(stat.month));
-      const counts = monthlyStats.map(stat => stat.employee_count);
+      const labels = stats.map(stat => formatMonth(stat.month));
+      const counts = stats.map(stat => metric === 'average' ? stat.average_daily_employees : stat.employee_count);
+
+      if (subtitle) {
+        subtitle.textContent = metric === 'average'
+          ? 'Average daily crew size per month'
+          : 'Unique employees working each month';
+      }
 
       employeeChart = new Chart(canvas, {
         type: 'line',
         data: {
           labels,
           datasets: [{
-            label: 'Employees',
+            label: metric === 'average' ? 'Avg daily employees' : 'Employees',
             data: counts,
             borderColor: 'rgba(37, 99, 235, 1)',
             backgroundColor: 'rgba(37, 99, 235, 0.15)',
