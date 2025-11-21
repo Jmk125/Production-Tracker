@@ -233,20 +233,34 @@ const timeEntryQueries = {
       if (!monthlyData[month]) {
         monthlyData[month] = {
           total_hours: 0,
-          employees: new Set()
+          employees: new Set(),
+          days: {}
         };
       }
       monthlyData[month].total_hours += entry.hours;
       monthlyData[month].employees.add(entry.employee_name);
+
+      if (!monthlyData[month].days[entry.date]) {
+        monthlyData[month].days[entry.date] = new Set();
+      }
+      monthlyData[month].days[entry.date].add(entry.employee_name);
     });
 
     return Object.keys(monthlyData)
       .sort()
-      .map(month => ({
-        month,
-        total_hours: monthlyData[month].total_hours,
-        employee_count: monthlyData[month].employees.size
-      }));
+      .map(month => {
+        const dayEmployeeCounts = Object.values(monthlyData[month].days).map(set => set.size);
+        const averageDailyEmployeesRaw = dayEmployeeCounts.length > 0
+          ? dayEmployeeCounts.reduce((sum, count) => sum + count, 0) / dayEmployeeCounts.length
+          : 0;
+
+        return {
+          month,
+          total_hours: monthlyData[month].total_hours,
+          employee_count: monthlyData[month].employees.size,
+          average_daily_employees: Number(averageDailyEmployeesRaw.toFixed(2))
+        };
+      });
   },
 
   getMonthlyByCategory: async (project_id) => {
@@ -302,20 +316,45 @@ const comparisonQueries = {
     const project = projects.find(p => p.id === parseInt(project_id));
 
     if (projectEntries.length === 0) {
-      return [];
+      return {
+        entries: [],
+        employeeStats: {
+          projectTimeline: {},
+          calendarTimeline: {}
+        }
+      };
     }
 
     // Find the first date for this project
     const dates = projectEntries.map(e => new Date(e.date));
     const firstDate = new Date(Math.min(...dates));
 
-    const result = [];
     const aggregated = {};
+    const projectMonthStats = {};
+    const calendarMonthStats = {};
 
     projectEntries.forEach(entry => {
       const entryDate = new Date(entry.date);
       const monthsDiff = Math.floor((entryDate - firstDate) / (30.44 * 24 * 60 * 60 * 1000)) + 1;
       const calendarMonth = entry.date.substring(0, 7);
+
+      if (!projectMonthStats[monthsDiff]) {
+        projectMonthStats[monthsDiff] = { unique: new Set(), days: {} };
+      }
+      if (!projectMonthStats[monthsDiff].days[entry.date]) {
+        projectMonthStats[monthsDiff].days[entry.date] = new Set();
+      }
+      projectMonthStats[monthsDiff].unique.add(entry.employee_name);
+      projectMonthStats[monthsDiff].days[entry.date].add(entry.employee_name);
+
+      if (!calendarMonthStats[calendarMonth]) {
+        calendarMonthStats[calendarMonth] = { unique: new Set(), days: {} };
+      }
+      if (!calendarMonthStats[calendarMonth].days[entry.date]) {
+        calendarMonthStats[calendarMonth].days[entry.date] = new Set();
+      }
+      calendarMonthStats[calendarMonth].unique.add(entry.employee_name);
+      calendarMonthStats[calendarMonth].days[entry.date].add(entry.employee_name);
 
       const key = `${calendarMonth}|${monthsDiff}|${entry.cost_code}|${entry.pay_class}|${entry.job_description}|${entry.employee_name}`;
 
@@ -335,7 +374,26 @@ const comparisonQueries = {
       aggregated[key].total_hours += entry.hours;
     });
 
-    return Object.values(aggregated).sort((a, b) => a.project_month - b.project_month);
+    const buildEmployeeStats = (statMap) => Object.entries(statMap).reduce((acc, [key, value]) => {
+      const dayCounts = Object.values(value.days).map(set => set.size);
+      const averageDailyEmployeesRaw = dayCounts.length > 0
+        ? dayCounts.reduce((sum, count) => sum + count, 0) / dayCounts.length
+        : 0;
+
+      acc[key] = {
+        uniqueEmployees: value.unique.size,
+        averageDailyEmployees: Number(averageDailyEmployeesRaw.toFixed(2))
+      };
+      return acc;
+    }, {});
+
+    return {
+      entries: Object.values(aggregated).sort((a, b) => a.project_month - b.project_month),
+      employeeStats: {
+        projectTimeline: buildEmployeeStats(projectMonthStats),
+        calendarTimeline: buildEmployeeStats(calendarMonthStats)
+      }
+    };
   }
 };
 

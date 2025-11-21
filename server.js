@@ -343,10 +343,11 @@ app.post('/api/comparison/timeline', async (req, res) => {
     
     const comparisonData = await Promise.all(
       projectIds.map(async (projectId) => {
-        const data = await comparisonQueries.getProjectTimeline(projectId);
+        const { entries, employeeStats } = await comparisonQueries.getProjectTimeline(projectId);
         return {
           projectId,
-          data
+          data: entries,
+          employeeStats
         };
       })
     );
