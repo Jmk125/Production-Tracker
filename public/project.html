@@ -124,6 +124,9 @@
         </div>
         <div class="chart-container" style="min-height: 320px;">
           <canvas id="employeeChart" aria-label="Employees per month"></canvas>
+          <div id="employeeChartEmptyState" style="display: none; color: var(--text-secondary); text-align: center; padding: 2rem;">
+            No employee data yet.
+          </div>
         </div>
       </div>
 
@@ -1156,6 +1159,7 @@
       const metric = document.getElementById('employeeMetric')?.value || 'unique';
       const subtitle = document.getElementById('employeeChartSubtitle');
       const applyFilters = document.getElementById('employeeApplyFiltersToggle')?.checked;
+      const emptyState = document.getElementById('employeeChartEmptyState');
 
       const stats = applyFilters
         ? buildMonthlyEmployeeStats(filterBySelectedJobs(filterBySelectedCostCodes(timeEntries)))
@@ -1166,8 +1170,20 @@
           }));
 
       if (!stats || stats.length === 0) {
-        canvas.parentElement.innerHTML = '<p style="color: var(--text-secondary); text-align: center; padding: 2rem;">No employee data yet.</p>';
+        if (employeeChart) {
+          employeeChart.destroy();
+          employeeChart = null;
+        }
+        canvas.style.display = 'none';
+        if (emptyState) {
+          emptyState.style.display = 'block';
+        }
         return;
+      }
+
+      canvas.style.display = 'block';
+      if (emptyState) {
+        emptyState.style.display = 'none';
       }
 
       if (employeeChart) {
