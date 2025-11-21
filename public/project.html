@@ -141,7 +141,7 @@
         <div class="card-header">
           <div>
             <h3 class="card-title" style="margin-bottom: 0.25rem;">Upload Budget Spreadsheet</h3>
-            <p style="color: var(--text-secondary); font-size: 0.9rem;">We'll read cost codes from column D and labor hours from column K, then total by cost code.</p>
+            <p style="color: var(--text-secondary); font-size: 0.9rem;">We'll read cost codes from column B and labor hours from column I, then total by cost code.</p>
           </div>
         </div>
 
@@ -1102,61 +1102,64 @@
 
     // FIXED: Updated budget parser to read from columns D and K
     async function parseBudgetFile(file) {
-      if (typeof XLSX === 'undefined') {
-        throw new Error('Spreadsheet parser not available.');
-      }
+  if (typeof XLSX === 'undefined') {
+    throw new Error('Spreadsheet parser not available.');
+  }
 
-      const buffer = await file.arrayBuffer();
-      const workbook = XLSX.read(buffer, { type: 'array' });
-      
-      // Look for "Report" sheet, or use first sheet if not found
-      let sheetName = workbook.SheetNames.find(name => name.toLowerCase() === 'report');
-      if (!sheetName) {
-        sheetName = workbook.SheetNames[0];
-      }
-      
-      const sheet = workbook.Sheets[sheetName];
-      const rows = XLSX.utils.sheet_to_json(sheet, { header: 1, defval: '' });
+  const buffer = await file.arrayBuffer();
+  const workbook = XLSX.read(buffer, { type: 'array' });
+  
+  // Use first sheet (should be the budget sheet)
+  const sheetName = workbook.SheetNames[0];
+  const sheet = workbook.Sheets[sheetName];
+  const rows = XLSX.utils.sheet_to_json(sheet, { header: 1, defval: '' });
 
-      if (!rows.length) {
-        throw new Error('The spreadsheet is empty.');
-      }
+  if (!rows.length) {
+    throw new Error('The spreadsheet is empty.');
+  }
 
-      // Column D is index 3 (0-based), Column K is index 10
-      const costCodeIndex = 3;  // Column D
-      const hoursIndex = 10;     // Column K
+  // Column B is index 1 (0-based), Column I is index 8
+  const costCodeIndex = 1;  // Column B
+  const hoursIndex = 8;      // Column I
 
-      const totals = {};
-      let rowsProcessed = 0;
-      
-      // Start from row 1 to skip header row (row 0)
-      for (let i = 1; i < rows.length; i++) {
-        const row = rows[i];
-        if (!row || row.length <= hoursIndex) continue;
-        
-        const rawCode = row[costCodeIndex];
-        const rawHours = row[hoursIndex];
-        
-        // Skip if either value is missing or empty
-        if (!rawCode || rawCode === '') continue;
-        
-        const hours = parseFloat(rawHours);
-        const normalizedCode = normalizeCostCodeClient(rawCode);
+  const totals = {};
+  let rowsProcessed = 0;
+  
+  // Start from row 1 to skip any header rows
+  for (let i = 1; i < rows.length; i++) {
+    const row = rows[i];
+    if (!row || row.length <= hoursIndex) continue;
+    
+    const rawCode = row[costCodeIndex];
+    const rawHours = row[hoursIndex];
+    
+    // Skip if either value is missing or empty
+    if (!rawCode || rawCode === '') continue;
+    
+    // Skip "Total" rows (cost code contains "Total")
+    if (rawCode.toString().toLowerCase().includes('total')) continue;
+    
+    // Skip division header rows (cost codes without dashes like "01", "06", "07")
+    const codeStr = rawCode.toString().trim();
+    if (codeStr.match(/^\d{2}$/)) continue;
+    
+    const hours = parseFloat(rawHours);
+    const normalizedCode = normalizeCostCodeClient(rawCode);
 
-        // Only process if we have a valid cost code and numeric hours
-        if (!normalizedCode || !Number.isFinite(hours)) continue;
+    // Only process if we have a valid cost code and numeric hours
+    if (!normalizedCode || !Number.isFinite(hours)) continue;
 
-        totals[normalizedCode] = (totals[normalizedCode] || 0) + hours;
-        rowsProcessed++;
-      }
+    totals[normalizedCode] = (totals[normalizedCode] || 0) + hours;
+    rowsProcessed++;
+  }
 
-      if (Object.keys(totals).length === 0) {
-        throw new Error(`No valid cost codes with labor hours were found. Processed ${rowsProcessed} rows from sheet "${sheetName}".`);
-      }
+  if (Object.keys(totals).length === 0) {
+    throw new Error(`No valid cost codes with labor hours were found. Processed ${rowsProcessed} rows from sheet "${sheetName}".`);
+  }
 
-      console.log(`Successfully parsed ${Object.keys(totals).length} unique cost codes from ${rowsProcessed} rows in sheet "${sheetName}"`);
-      return totals;
-    }
+  console.log(`Successfully parsed ${Object.keys(totals).length} unique cost codes from ${rowsProcessed} rows in sheet "${sheetName}"`);
+  return totals;
+}
 
     function switchTab(evt, tabName) {
       // Update tab buttons
