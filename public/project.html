@@ -53,6 +53,9 @@
             <label style="display: inline-flex; align-items: center; gap: 0.35rem; font-size: 0.9rem; color: var(--text-secondary);">
               <input type="checkbox" id="stackToggle" checked onchange="updateChart()"> Stack bars
             </label>
+            <label style="display: inline-flex; align-items: center; gap: 0.35rem; font-size: 0.9rem; color: var(--text-secondary);">
+              <input type="checkbox" id="applyFiltersToggle" checked onchange="updateChart()"> Apply filters
+            </label>
           </div>
         </div>
         <div id="filterPanel" class="filter-bar" style="display: none;">
@@ -1012,6 +1015,7 @@
       const viewType = document.getElementById('viewType').value;
       const stacked = document.getElementById('stackToggle').checked;
       const ctx = document.getElementById('hoursChart');
+      const applyFilters = document.getElementById('applyFiltersToggle')?.checked !== false;
 
       toggleFilterPanelVisibility(true);
 
