@@ -62,6 +62,31 @@
               </select>
             </div>
           </div>
+          <div id="comparisonFilterPanel" class="filter-bar" style="display: none;">
+            <div class="filter-section">
+              <div class="filter-section-header">
+                <div>
+                  <div class="filter-title">Cost codes</div>
+                  <div class="filter-subtitle">Choose which cost codes feed the charts</div>
+                </div>
+                <button class="collapse-toggle" type="button" onclick="toggleFilterSection('comparisonCostCodeSection', this)">Hide</button>
+              </div>
+              <div id="comparisonCostCodeSection" class="filter-section-body">
+                <div class="filter-actions">
+                  <label class="checkbox">
+                    <input type="checkbox" id="comparisonCostCodeAllToggle" checked onchange="toggleAllCostCodes(event)"> All cost codes
+                  </label>
+                  <label class="checkbox">
+                    <input type="checkbox" id="comparisonCostCode09Toggle" checked onchange="toggleDivisionCostCodes(event, ['09'])"> 09 division
+                  </label>
+                  <label class="checkbox">
+                    <input type="checkbox" id="comparisonCostCode06GroupToggle" checked onchange="toggleDivisionCostCodes(event, ['06','08','10','11','12'])"> 06 + 08/10/11/12 divisions
+                  </label>
+                </div>
+                <div id="comparisonCostCodeList" class="filter-list"></div>
+              </div>
+            </div>
+          </div>
           <div class="chart-container">
             <canvas id="comparisonChart"></canvas>
           </div>
@@ -70,17 +95,17 @@
         <div class="card" style="margin-bottom: 1.5rem;">
           <div class="card-header" style="align-items: flex-start;">
             <div>
-              <h3 class="card-title">Monthly Employees</h3>
-              <div id="employeeComparisonSubtitle" style="color: var(--text-secondary); font-size: 0.9rem;">Unique employees working each month</div>
+                <h3 class="card-title">Monthly Employees</h3>
+                <div id="employeeComparisonSubtitle" style="color: var(--text-secondary); font-size: 0.9rem;">Unique employees working each month</div>
+              </div>
+              <div class="chart-controls">
+                <label for="employeeComparisonMetric" style="font-size: 0.9rem; color: var(--text-secondary);">View</label>
+                <select id="employeeComparisonMetric" onchange="updateEmployeeChart(getFilteredComparisonData())">
+                  <option value="unique" selected>Unique employees</option>
+                  <option value="average">Average daily crew size</option>
+                </select>
+              </div>
             </div>
-            <div class="chart-controls">
-              <label for="employeeComparisonMetric" style="font-size: 0.9rem; color: var(--text-secondary);">View</label>
-              <select id="employeeComparisonMetric" onchange="updateEmployeeChart()">
-                <option value="unique" selected>Unique employees</option>
-                <option value="average">Average daily crew size</option>
-              </select>
-            </div>
-          </div>
           <div class="chart-container" style="min-height: 360px;">
             <canvas id="employeeComparisonChart"></canvas>
           </div>
@@ -108,6 +133,8 @@
     let allProjects = [];
     let selectedProjects = new Set();
     let comparisonData = [];
+    let comparisonCostCodeList = [];
+    let selectedComparisonCostCodes = new Set();
     let comparisonChart = null;
     let employeeComparisonChart = null;
     const chartColors = [
@@ -186,6 +213,7 @@
         document.getElementById('emptyState').style.display = 'none';
         document.getElementById('metricsComparison').style.display = 'block';
 
+        initializeCostCodeFilters();
         updateCharts();
         renderMetrics();
       } catch (error) {
@@ -194,26 +222,166 @@
       }
     }
 
-    function updateCharts() {
-      updateComparisonChart();
-      updateEmployeeChart();
+    function initializeCostCodeFilters() {
+      const uniqueCodes = new Set();
+
+      comparisonData.forEach(project => {
+        project.data.forEach(entry => {
+          uniqueCodes.add(normalizeCostCodeLabel(entry.cost_code));
+        });
+      });
+
+      comparisonCostCodeList = Array.from(uniqueCodes).sort();
+      selectedComparisonCostCodes = new Set(comparisonCostCodeList);
+
+      renderCostCodeList();
+      updateCostCodeMasterCheckboxes();
+      toggleFilterPanelVisibility(true);
     }
 
-    function updateComparisonChart() {
+    function renderCostCodeList() {
+      const list = document.getElementById('comparisonCostCodeList');
+      if (!list) return;
+
+      if (!comparisonCostCodeList.length) {
+        list.innerHTML = '<div class="empty-filter">No cost codes available.</div>';
+        return;
+      }
+
+      list.innerHTML = '';
+
+      comparisonCostCodeList.forEach(code => {
+        const label = document.createElement('label');
+        label.className = 'checkbox chip';
+        label.title = `Toggle ${code}`;
+
+        const input = document.createElement('input');
+        input.type = 'checkbox';
+        input.value = code;
+        input.checked = selectedComparisonCostCodes.has(code);
+        input.addEventListener('change', handleCostCodeToggle);
+
+        label.appendChild(input);
+        label.appendChild(document.createTextNode(` ${code}`));
+
+        list.appendChild(label);
+      });
+    }
+
+    function toggleFilterPanelVisibility(show = true) {
+      const container = document.getElementById('comparisonFilterPanel');
+      if (!container) return;
+
+      const hasFilters = comparisonCostCodeList.length > 0;
+      container.style.display = show && hasFilters ? 'flex' : 'none';
+    }
+
+    function handleCostCodeToggle(event) {
+      const code = event.target.value;
+      if (event.target.checked) {
+        selectedComparisonCostCodes.add(code);
+      } else {
+        selectedComparisonCostCodes.delete(code);
+      }
+
+      updateCostCodeMasterCheckboxes();
+      updateCharts();
+    }
+
+    function toggleAllCostCodes(event) {
+      const shouldSelectAll = event.target.checked;
+
+      if (shouldSelectAll) {
+        selectedComparisonCostCodes = new Set(comparisonCostCodeList);
+      } else {
+        selectedComparisonCostCodes.clear();
+      }
+
+      renderCostCodeList();
+      updateCostCodeMasterCheckboxes();
+      updateCharts();
+    }
+
+    function toggleDivisionCostCodes(event, prefixes) {
+      const shouldSelect = event.target.checked;
+
+      comparisonCostCodeList.forEach(code => {
+        if (prefixes.some(prefix => code.startsWith(prefix))) {
+          if (shouldSelect) {
+            selectedComparisonCostCodes.add(code);
+          } else {
+            selectedComparisonCostCodes.delete(code);
+          }
+        }
+      });
+
+      renderCostCodeList();
+      updateCostCodeMasterCheckboxes();
+      updateCharts();
+    }
+
+    function updateCostCodeMasterCheckboxes() {
+      const allToggle = document.getElementById('comparisonCostCodeAllToggle');
+      const toggle09 = document.getElementById('comparisonCostCode09Toggle');
+      const toggle06Group = document.getElementById('comparisonCostCode06GroupToggle');
+
+      const totalCount = comparisonCostCodeList.length;
+      const selectedCount = selectedComparisonCostCodes.size;
+
+      if (allToggle) {
+        allToggle.indeterminate = selectedCount > 0 && selectedCount < totalCount;
+        allToggle.checked = selectedCount === totalCount && totalCount > 0;
+      }
+
+      if (toggle09) {
+        const codes09 = comparisonCostCodeList.filter(code => code.startsWith('09'));
+        const selected09 = codes09.filter(code => selectedComparisonCostCodes.has(code)).length;
+        toggle09.indeterminate = selected09 > 0 && selected09 < codes09.length;
+        toggle09.checked = codes09.length > 0 && selected09 === codes09.length;
+      }
+
+      if (toggle06Group) {
+        const prefixes = ['06', '08', '10', '11', '12'];
+        const codes06Group = comparisonCostCodeList.filter(code => prefixes.some(prefix => code.startsWith(prefix)));
+        const selected06Group = codes06Group.filter(code => selectedComparisonCostCodes.has(code)).length;
+        toggle06Group.indeterminate = selected06Group > 0 && selected06Group < codes06Group.length;
+        toggle06Group.checked = codes06Group.length > 0 && selected06Group === codes06Group.length;
+      }
+    }
+
+    function toggleFilterSection(sectionId, trigger) {
+      const section = document.getElementById(sectionId);
+      if (!section) return;
+
+      const isHidden = section.classList.toggle('collapsed');
+      section.style.display = isHidden ? 'none' : 'grid';
+      if (trigger) {
+        trigger.textContent = isHidden ? 'Show' : 'Hide';
+        trigger.setAttribute('aria-expanded', (!isHidden).toString());
+      }
+    }
+
+    function updateCharts() {
+      const filteredData = getFilteredComparisonData();
+      updateComparisonChart(filteredData);
+      updateEmployeeChart(filteredData);
+    }
+
+    function updateComparisonChart(data = comparisonData) {
       const timelineType = document.getElementById('timelineType').value;
       const viewType = document.getElementById('comparisonView').value;
-      
-      if (comparisonData.length === 0) return;
+
+      if (data.length === 0) return;
 
       const ctx = document.getElementById('comparisonChart');
-      
+
       if (comparisonChart) {
         comparisonChart.destroy();
       }
 
       const chartData = timelineType === 'project'
-        ? buildProjectTimelineChart(comparisonData, viewType)
-        : buildCalendarTimelineChart(comparisonData, viewType);
+        ? buildProjectTimelineChart(data, viewType)
+        : buildCalendarTimelineChart(data, viewType);
 
       comparisonChart = new Chart(ctx, {
         type: 'line',
@@ -258,12 +426,12 @@
       });
     }
 
-    function updateEmployeeChart() {
+    function updateEmployeeChart(data = comparisonData) {
       const timelineType = document.getElementById('timelineType').value;
       const metric = document.getElementById('employeeComparisonMetric')?.value || 'unique';
       const subtitle = document.getElementById('employeeComparisonSubtitle');
 
-      if (comparisonData.length === 0) return;
+      if (data.length === 0) return;
 
       const ctx = document.getElementById('employeeComparisonChart');
 
@@ -271,7 +439,7 @@
         employeeComparisonChart.destroy();
       }
 
-      const chartData = buildEmployeeChartData(comparisonData, timelineType, metric);
+      const chartData = buildEmployeeChartData(data, timelineType, metric);
 
       if (subtitle) {
         subtitle.textContent = metric === 'average'
@@ -316,6 +484,93 @@
           }
         }
       });
+    }
+
+    function getFilteredComparisonData() {
+      if (!selectedComparisonCostCodes.size) {
+        return comparisonData.map(project => ({
+          ...project,
+          data: [],
+          rawEntries: project.rawEntries || [],
+          employeeStats: buildEmployeeStatsFromEntries([], project.projectStartDate)
+        }));
+      }
+
+      return comparisonData.map(project => {
+        const filteredEntries = filterBySelectedCostCodes(project.data);
+        const filteredRawEntries = filterRawEntriesByCostCode(project.rawEntries || []);
+
+        return {
+          ...project,
+          data: filteredEntries,
+          rawEntries: filteredRawEntries,
+          employeeStats: buildEmployeeStatsFromEntries(filteredRawEntries, project.projectStartDate)
+        };
+      });
+    }
+
+    function filterBySelectedCostCodes(entries) {
+      if (!selectedComparisonCostCodes.size) return [];
+      return entries.filter(entry => selectedComparisonCostCodes.has(normalizeCostCodeLabel(entry.cost_code)));
+    }
+
+    function filterRawEntriesByCostCode(entries) {
+      if (!selectedComparisonCostCodes.size) return [];
+      return entries.filter(entry => selectedComparisonCostCodes.has(normalizeCostCodeLabel(entry.cost_code)));
+    }
+
+    function buildEmployeeStatsFromEntries(entries, projectStartDate) {
+      if (!entries || !entries.length) {
+        return { projectTimeline: {}, calendarTimeline: {} };
+      }
+
+      const firstDate = projectStartDate ? new Date(projectStartDate + 'T00:00:00') : new Date(Math.min(...entries.map(e => new Date(e.date))));
+      const projectMonthStats = {};
+      const calendarMonthStats = {};
+
+      entries.forEach(entry => {
+        if (!entry.date) return;
+
+        const entryDate = new Date(entry.date);
+        const monthsDiff = Math.floor((entryDate - firstDate) / (30.44 * 24 * 60 * 60 * 1000)) + 1;
+        const calendarMonth = entry.date.substring(0, 7);
+
+        if (!projectMonthStats[monthsDiff]) {
+          projectMonthStats[monthsDiff] = { unique: new Set(), days: {} };
+        }
+        if (!projectMonthStats[monthsDiff].days[entry.date]) {
+          projectMonthStats[monthsDiff].days[entry.date] = new Set();
+        }
+        projectMonthStats[monthsDiff].unique.add(entry.employee_name);
+        projectMonthStats[monthsDiff].days[entry.date].add(entry.employee_name);
+
+        if (!calendarMonthStats[calendarMonth]) {
+          calendarMonthStats[calendarMonth] = { unique: new Set(), days: {} };
+        }
+        if (!calendarMonthStats[calendarMonth].days[entry.date]) {
+          calendarMonthStats[calendarMonth].days[entry.date] = new Set();
+        }
+        calendarMonthStats[calendarMonth].unique.add(entry.employee_name);
+        calendarMonthStats[calendarMonth].days[entry.date].add(entry.employee_name);
+      });
+
+      const buildStats = (statMap) => Object.entries(statMap).reduce((acc, [key, value]) => {
+        const dayCounts = Object.values(value.days).map(set => set.size);
+        const averageDailyEmployeesRaw = dayCounts.length
+          ? dayCounts.reduce((sum, count) => sum + count, 0) / dayCounts.length
+          : 0;
+
+        acc[key] = {
+          uniqueEmployees: value.unique.size,
+          averageDailyEmployees: Number(averageDailyEmployeesRaw.toFixed(2))
+        };
+        return acc;
+      }, {});
+
+      return {
+        projectTimeline: buildStats(projectMonthStats),
+        calendarTimeline: buildStats(calendarMonthStats)
+      };
     }
 
     function buildProjectTimelineChart(data, viewType) {
@@ -529,6 +784,12 @@
       const [year, month] = monthStr.split('-');
       const date = new Date(year, month - 1);
       return date.toLocaleDateString('en-US', { month: 'short', year: 'numeric' });
+    }
+
+    function normalizeCostCodeLabel(code) {
+      if (code === null || code === undefined) return 'Unknown';
+      const normalized = code.toString().trim();
+      return normalized || 'Unknown';
     }
 
     function buildTotalDataset(project, months, monthKey, colorIndex) {

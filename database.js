@@ -328,6 +328,7 @@ const comparisonQueries = {
     // Find the first date for this project
     const dates = projectEntries.map(e => new Date(e.date));
     const firstDate = new Date(Math.min(...dates));
+    const projectStartDate = firstDate.toISOString().substring(0, 10);
 
     const aggregated = {};
     const projectMonthStats = {};
@@ -389,6 +390,8 @@ const comparisonQueries = {
 
     return {
       entries: Object.values(aggregated).sort((a, b) => a.project_month - b.project_month),
+      rawEntries: projectEntries,
+      projectStartDate,
       employeeStats: {
         projectTimeline: buildEmployeeStats(projectMonthStats),
         calendarTimeline: buildEmployeeStats(calendarMonthStats)
