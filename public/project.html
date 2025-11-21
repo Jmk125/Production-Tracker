@@ -55,19 +55,47 @@
             </label>
           </div>
         </div>
-        <div id="costCodeFilters" class="filter-bar" style="display: none;">
-          <div class="filter-actions">
-            <label class="checkbox">
-              <input type="checkbox" id="costCodeAllToggle" checked onchange="toggleAllCostCodes(event)"> All cost codes
-            </label>
-            <label class="checkbox">
-              <input type="checkbox" id="costCode09Toggle" checked onchange="toggleDivisionCostCodes(event, ['09'])"> 09 division
-            </label>
-            <label class="checkbox">
-              <input type="checkbox" id="costCode06GroupToggle" checked onchange="toggleDivisionCostCodes(event, ['06','08','10','11','12'])"> 06 + 08/10/11/12 divisions
-            </label>
+        <div id="filterPanel" class="filter-bar" style="display: none;">
+          <div class="filter-section">
+            <div class="filter-section-header">
+              <div>
+                <div class="filter-title">Cost codes</div>
+                <div class="filter-subtitle">Choose which cost codes feed the chart</div>
+              </div>
+              <button class="collapse-toggle" type="button" onclick="toggleFilterSection('costCodeSection', this)">Hide</button>
+            </div>
+            <div id="costCodeSection" class="filter-section-body">
+              <div class="filter-actions">
+                <label class="checkbox">
+                  <input type="checkbox" id="costCodeAllToggle" checked onchange="toggleAllCostCodes(event)"> All cost codes
+                </label>
+                <label class="checkbox">
+                  <input type="checkbox" id="costCode09Toggle" checked onchange="toggleDivisionCostCodes(event, ['09'])"> 09 division
+                </label>
+                <label class="checkbox">
+                  <input type="checkbox" id="costCode06GroupToggle" checked onchange="toggleDivisionCostCodes(event, ['06','08','10','11','12'])"> 06 + 08/10/11/12 divisions
+                </label>
+              </div>
+              <div id="costCodeList" class="filter-list"></div>
+            </div>
           </div>
-          <div id="costCodeList" class="filter-list"></div>
+          <div class="filter-section">
+            <div class="filter-section-header">
+              <div>
+                <div class="filter-title">Buildings</div>
+                <div class="filter-subtitle">Select which jobs/buildings to include</div>
+              </div>
+              <button class="collapse-toggle" type="button" onclick="toggleFilterSection('jobSection', this)">Hide</button>
+            </div>
+            <div id="jobSection" class="filter-section-body">
+              <div class="filter-actions">
+                <label class="checkbox">
+                  <input type="checkbox" id="jobAllToggle" checked onchange="toggleAllJobs(event)"> All jobs/buildings
+                </label>
+              </div>
+              <div id="jobList" class="filter-list"></div>
+            </div>
+          </div>
         </div>
         <div class="chart-container">
           <canvas id="hoursChart"></canvas>
@@ -234,6 +262,8 @@
     let monthlyStats = [];
     let costCodeList = [];
     let selectedCostCodes = new Set();
+    let jobList = [];
+    let selectedJobs = new Set();
     let budgetData = null;
     let budgetComparison = [];
     let hoursChart = null;
@@ -287,6 +317,7 @@
         const response = await fetch(`/api/projects/${projectId}/stats/monthly-detail`);
         detailedStats = await response.json();
         initializeCostCodeFilters();
+        initializeJobFilters();
       } catch (error) {
         console.error('Error loading detailed stats:', error);
       }
@@ -344,7 +375,25 @@
 
       renderCostCodeList();
       updateCostCodeMasterCheckboxes();
-      toggleCostCodeFilterVisibility(true);
+      toggleFilterPanelVisibility(true);
+    }
+
+    function initializeJobFilters() {
+      const uniqueJobs = new Set();
+
+      detailedStats.forEach(entry => {
+        const normalized = normalizeJobLabel(entry.job_description);
+        if (normalized) {
+          uniqueJobs.add(normalized);
+        }
+      });
+
+      jobList = Array.from(uniqueJobs).sort((a, b) => a.localeCompare(b));
+      selectedJobs = new Set(jobList);
+
+      renderJobList();
+      updateJobMasterCheckboxes();
+      toggleFilterPanelVisibility(true);
     }
 
     function renderCostCodeList() {
@@ -376,11 +425,12 @@
       });
     }
 
-    function toggleCostCodeFilterVisibility(show = true) {
-      const container = document.getElementById('costCodeFilters');
+    function toggleFilterPanelVisibility(show = true) {
+      const container = document.getElementById('filterPanel');
       if (!container) return;
 
-      container.style.display = show && costCodeList.length ? 'flex' : 'none';
+      const hasFilters = costCodeList.length || jobList.length;
+      container.style.display = show && hasFilters ? 'flex' : 'none';
     }
 
     function handleCostCodeToggle(event) {
@@ -456,15 +506,106 @@
       }
     }
 
+    function renderJobList() {
+      const list = document.getElementById('jobList');
+      if (!list) return;
+
+      if (!jobList.length) {
+        list.innerHTML = '<div class="empty-filter">No jobs/buildings available.</div>';
+        return;
+      }
+
+      list.innerHTML = '';
+
+      jobList.forEach(job => {
+        const label = document.createElement('label');
+        label.className = 'checkbox chip';
+        label.title = `Toggle ${job}`;
+
+        const input = document.createElement('input');
+        input.type = 'checkbox';
+        input.value = job;
+        input.checked = selectedJobs.has(job);
+        input.addEventListener('change', handleJobToggle);
+
+        label.appendChild(input);
+        label.appendChild(document.createTextNode(` ${job}`));
+
+        list.appendChild(label);
+      });
+    }
+
+    function handleJobToggle(event) {
+      const job = event.target.value;
+
+      if (event.target.checked) {
+        selectedJobs.add(job);
+      } else {
+        selectedJobs.delete(job);
+      }
+
+      updateJobMasterCheckboxes();
+      updateChart();
+    }
+
+    function toggleAllJobs(event) {
+      const shouldSelectAll = event.target.checked;
+
+      if (shouldSelectAll) {
+        selectedJobs = new Set(jobList);
+      } else {
+        selectedJobs.clear();
+      }
+
+      renderJobList();
+      updateJobMasterCheckboxes();
+      updateChart();
+    }
+
+    function updateJobMasterCheckboxes() {
+      const allToggle = document.getElementById('jobAllToggle');
+      const totalCount = jobList.length;
+      const selectedCount = selectedJobs.size;
+
+      if (allToggle) {
+        allToggle.indeterminate = selectedCount > 0 && selectedCount < totalCount;
+        allToggle.checked = totalCount > 0 && selectedCount === totalCount;
+      }
+    }
+
+    function toggleFilterSection(sectionId, trigger) {
+      const section = document.getElementById(sectionId);
+      if (!section) return;
+
+      const isHidden = section.classList.toggle('collapsed');
+      section.style.display = isHidden ? 'none' : 'grid';
+      if (trigger) {
+        trigger.textContent = isHidden ? 'Show' : 'Hide';
+        trigger.setAttribute('aria-expanded', (!isHidden).toString());
+      }
+    }
+
     function filterBySelectedCostCodes(data) {
       if (!selectedCostCodes.size) return [];
 
       return data.filter(entry => selectedCostCodes.has(normalizeCostCodeLabel(entry.cost_code)));
     }
 
+    function filterBySelectedJobs(data) {
+      if (!selectedJobs.size) return [];
+
+      return data.filter(entry => selectedJobs.has(normalizeJobLabel(entry.job_description)));
+    }
+
     function normalizeCostCodeLabel(code) {
       if (code === null || code === undefined) return 'Unknown';
       const normalized = code.toString().trim();
+      return normalized || 'Unknown';
+    }
+
+    function normalizeJobLabel(job) {
+      if (job === null || job === undefined) return 'Unknown';
+      const normalized = job.toString().trim();
       return normalized || 'Unknown';
     }
 
@@ -821,9 +962,9 @@
       const stacked = document.getElementById('stackToggle').checked;
       const ctx = document.getElementById('hoursChart');
 
-      toggleCostCodeFilterVisibility(true);
+      toggleFilterPanelVisibility(true);
 
-      const dataSource = filterBySelectedCostCodes(detailedStats);
+      const dataSource = filterBySelectedJobs(filterBySelectedCostCodes(detailedStats));
 
       const hiddenStates = hoursChart
         ? hoursChart.data.datasets.map((ds, index) => ({ label: ds.label ?? index, hidden: ds.hidden }))
