@@ -53,6 +53,9 @@
             <label style="display: inline-flex; align-items: center; gap: 0.35rem; font-size: 0.9rem; color: var(--text-secondary);">
               <input type="checkbox" id="stackToggle" checked onchange="updateChart()"> Stack bars
             </label>
+            <label style="display: inline-flex; align-items: center; gap: 0.35rem; font-size: 0.9rem; color: var(--text-secondary);">
+              <input type="checkbox" id="applyFiltersToggle" checked onchange="updateChart()"> Apply filters
+            </label>
           </div>
         </div>
         <div id="filterPanel" class="filter-bar" style="display: none;">
@@ -103,9 +106,18 @@
       </div>
 
       <div class="card" style="margin-top: 1.5rem;">
-        <div class="card-header">
-          <h3 class="card-title">Monthly Employees</h3>
-          <div style="color: var(--text-secondary); font-size: 0.9rem;">Unique employees working each month</div>
+        <div class="card-header" style="align-items: flex-start;">
+          <div>
+            <h3 class="card-title">Monthly Employees</h3>
+            <div id="employeeChartSubtitle" style="color: var(--text-secondary); font-size: 0.9rem;">Unique employees working each month</div>
+          </div>
+          <div class="chart-controls">
+            <label for="employeeMetric" style="font-size: 0.9rem; color: var(--text-secondary);">View</label>
+            <select id="employeeMetric" onchange="renderEmployeeChart()">
+              <option value="unique" selected>Unique employees</option>
+              <option value="average">Average daily crew size</option>
+            </select>
+          </div>
         </div>
         <div class="chart-container" style="min-height: 320px;">
           <canvas id="employeeChart" aria-label="Employees per month"></canvas>
@@ -961,10 +973,13 @@
       const viewType = document.getElementById('viewType').value;
       const stacked = document.getElementById('stackToggle').checked;
       const ctx = document.getElementById('hoursChart');
+      const applyFilters = document.getElementById('applyFiltersToggle')?.checked !== false;
 
       toggleFilterPanelVisibility(true);
 
-      const dataSource = filterBySelectedJobs(filterBySelectedCostCodes(detailedStats));
+      const baseData = applyFilters
+        ? filterBySelectedJobs(filterBySelectedCostCodes(detailedStats))
+        : detailedStats;
 
       const hiddenStates = hoursChart
         ? hoursChart.data.datasets.map((ds, index) => ({ label: ds.label ?? index, hidden: ds.hidden }))
@@ -977,17 +992,17 @@
       let chartData;
 
       if (viewType === 'total') {
-        chartData = aggregateByMonth(dataSource);
+        chartData = aggregateByMonth(baseData);
       } else if (viewType === 'costCode') {
-        chartData = aggregateByCategory(dataSource, 'cost_code');
+        chartData = aggregateByCategory(baseData, 'cost_code');
       } else if (viewType === 'costCodeDivision') {
-        chartData = aggregateByCategory(dataSource, 'cost_code', formatCostCodeDivision);
+        chartData = aggregateByCategory(baseData, 'cost_code', formatCostCodeDivision);
       } else if (viewType === 'payClass') {
-        chartData = aggregateByCategory(dataSource, 'pay_class');
+        chartData = aggregateByCategory(baseData, 'pay_class');
       } else if (viewType === 'job') {
-        chartData = aggregateByCategory(dataSource, 'job_description');
+        chartData = aggregateByCategory(baseData, 'job_description');
       } else if (viewType === 'employee') {
-        chartData = aggregateByCategory(dataSource, 'employee_name');
+        chartData = aggregateByCategory(baseData, 'employee_name');
       }
 
       hoursChart = new Chart(ctx, {
@@ -1099,6 +1114,9 @@
       const canvas = document.getElementById('employeeChart');
       if (!canvas) return;
 
+      const metric = document.getElementById('employeeMetric')?.value || 'unique';
+      const subtitle = document.getElementById('employeeChartSubtitle');
+
       if (!monthlyStats || monthlyStats.length === 0) {
         canvas.parentElement.innerHTML = '<p style="color: var(--text-secondary); text-align: center; padding: 2rem;">No employee data yet.</p>';
         return;
@@ -1109,14 +1127,23 @@
       }
 
       const labels = monthlyStats.map(stat => formatMonth(stat.month));
-      const counts = monthlyStats.map(stat => stat.employee_count);
+      const counts = monthlyStats.map(stat => {
+        const value = metric === 'average' ? stat.average_daily_employees : stat.employee_count;
+        return typeof value === 'number' ? value : Number(value) || 0;
+      });
+
+      if (subtitle) {
+        subtitle.textContent = metric === 'average'
+          ? 'Average daily crew size per month'
+          : 'Unique employees working each month';
+      }
 
       employeeChart = new Chart(canvas, {
         type: 'line',
         data: {
           labels,
           datasets: [{
-            label: 'Employees',
+            label: metric === 'average' ? 'Avg daily employees' : 'Employees',
             data: counts,
             borderColor: 'rgba(37, 99, 235, 1)',
             backgroundColor: 'rgba(37, 99, 235, 0.15)',
