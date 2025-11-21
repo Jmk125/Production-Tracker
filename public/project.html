@@ -103,9 +103,18 @@
       </div>
 
       <div class="card" style="margin-top: 1.5rem;">
-        <div class="card-header">
-          <h3 class="card-title">Monthly Employees</h3>
-          <div style="color: var(--text-secondary); font-size: 0.9rem;">Unique employees working each month</div>
+        <div class="card-header" style="align-items: flex-start;">
+          <div>
+            <h3 class="card-title">Monthly Employees</h3>
+            <div id="employeeChartSubtitle" style="color: var(--text-secondary); font-size: 0.9rem;">Unique employees working each month</div>
+          </div>
+          <div class="chart-controls">
+            <label for="employeeMetric" style="font-size: 0.9rem; color: var(--text-secondary);">View</label>
+            <select id="employeeMetric" onchange="renderEmployeeChart()">
+              <option value="unique" selected>Unique employees</option>
+              <option value="average">Average daily crew size</option>
+            </select>
+          </div>
         </div>
         <div class="chart-container" style="min-height: 320px;">
           <canvas id="employeeChart" aria-label="Employees per month"></canvas>
@@ -1099,6 +1108,9 @@
       const canvas = document.getElementById('employeeChart');
       if (!canvas) return;
 
+      const metric = document.getElementById('employeeMetric')?.value || 'unique';
+      const subtitle = document.getElementById('employeeChartSubtitle');
+
       if (!monthlyStats || monthlyStats.length === 0) {
         canvas.parentElement.innerHTML = '<p style="color: var(--text-secondary); text-align: center; padding: 2rem;">No employee data yet.</p>';
         return;
@@ -1109,14 +1121,20 @@
       }
 
       const labels = monthlyStats.map(stat => formatMonth(stat.month));
-      const counts = monthlyStats.map(stat => stat.employee_count);
+      const counts = monthlyStats.map(stat => metric === 'average' ? stat.average_daily_employees : stat.employee_count);
+
+      if (subtitle) {
+        subtitle.textContent = metric === 'average'
+          ? 'Average daily crew size per month'
+          : 'Unique employees working each month';
+      }
 
       employeeChart = new Chart(canvas, {
         type: 'line',
         data: {
           labels,
           datasets: [{
-            label: 'Employees',
+            label: metric === 'average' ? 'Avg daily employees' : 'Employees',
             data: counts,
             borderColor: 'rgba(37, 99, 235, 1)',
             backgroundColor: 'rgba(37, 99, 235, 0.15)',
