@@ -251,6 +251,10 @@
         project.data.forEach(entry => {
           uniqueCodes.add(normalizeCostCodeLabel(entry.cost_code));
         });
+
+        (project.budgetComparison || []).forEach(row => {
+          uniqueCodes.add(normalizeCostCodeLabel(row.cost_code));
+        });
       });
 
       comparisonCostCodeList = Array.from(uniqueCodes).sort();

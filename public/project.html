@@ -310,9 +310,11 @@
     let budgetComparison = [];
     let areaData = { comparison: [], budgetAreas: [], actualAreas: [], mappings: {}, adjustments: { budget: {}, actual: {} } };
     let budgetSort = { column: 'variance_hours', direction: 'desc' };
+    let areaSort = { column: 'variance_hours', direction: 'desc' };
     let hoursChart = null;
     let payClassChart = null;
     let budgetChart = null;
+    let areaVarianceChart = null;
     let employeeChart = null;
 
     document.addEventListener('DOMContentLoaded', async () => {
@@ -1212,29 +1214,63 @@
 
     function renderAreaVarianceSummary() {
       const container = document.getElementById('areaVarianceSummary');
+      const currentMode = document.getElementById('areaVarianceChartMode')?.value || 'hours';
       if (!container) return;
 
       if (!areaData || !Array.isArray(areaData.comparison) || areaData.comparison.length === 0) {
         container.innerHTML = '<p style="color: var(--text-secondary);">Upload a budget with area names to see variance by area.</p>';
+        if (areaVarianceChart) {
+          areaVarianceChart.destroy();
+          areaVarianceChart = null;
+        }
         return;
       }
 
-      const rows = [...areaData.comparison].sort((a, b) => a.area.localeCompare(b.area));
+      const rows = sortAreaRows(areaData.comparison);
 
       container.innerHTML = `
-        <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 0.5rem;">
-          <h4 style="margin: 0;">Variance by area</h4>
-          <span style="color: var(--text-secondary); font-size: 0.9rem;">From budget import areas</span>
+        <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 0.5rem; gap: 1rem; flex-wrap: wrap;">
+          <div>
+            <h4 style="margin: 0;">Variance by area</h4>
+            <span style="color: var(--text-secondary); font-size: 0.9rem;">From budget import areas</span>
+          </div>
+          <div style="display: inline-flex; gap: 0.5rem; align-items: center;">
+            <label for="areaVarianceChartMode" style="font-size: 0.9rem; color: var(--text-secondary);">Display</label>
+            <select id="areaVarianceChartMode" onchange="renderAreaVarianceSummary()">
+              <option value="hours" ${currentMode === 'hours' ? 'selected' : ''}>Variance (hours)</option>
+              <option value="percent" ${currentMode === 'percent' ? 'selected' : ''}>Variance (%)</option>
+            </select>
+          </div>
         </div>
         <div style="overflow-x: auto;">
           <table style="width: 100%; border-collapse: collapse;">
             <thead>
               <tr style="border-bottom: 2px solid var(--border-color);">
-                <th style="padding: 0.6rem; text-align: left;">Area</th>
-                <th style="padding: 0.6rem; text-align: right;">Budgeted</th>
-                <th style="padding: 0.6rem; text-align: right;">Spent</th>
-                <th style="padding: 0.6rem; text-align: right;">Variance (hrs)</th>
-                <th style="padding: 0.6rem; text-align: right;">Variance (%)</th>
+                <th style="padding: 0.6rem; text-align: left;">
+                  <button class="sort-button" type="button" onclick="changeAreaSort('area')">
+                    Area ${renderAreaSortIndicator('area')}
+                  </button>
+                </th>
+                <th style="padding: 0.6rem; text-align: right;">
+                  <button class="sort-button" type="button" onclick="changeAreaSort('budget_hours')">
+                    Budgeted ${renderAreaSortIndicator('budget_hours')}
+                  </button>
+                </th>
+                <th style="padding: 0.6rem; text-align: right;">
+                  <button class="sort-button" type="button" onclick="changeAreaSort('actual_hours')">
+                    Spent ${renderAreaSortIndicator('actual_hours')}
+                  </button>
+                </th>
+                <th style="padding: 0.6rem; text-align: right;">
+                  <button class="sort-button" type="button" onclick="changeAreaSort('variance_hours')">
+                    Variance ${renderAreaSortIndicator('variance_hours')}
+                  </button>
+                </th>
+                <th style="padding: 0.6rem; text-align: right;">
+                  <button class="sort-button" type="button" onclick="changeAreaSort('variance_percent')">
+                    % Variance ${renderAreaSortIndicator('variance_percent')}
+                  </button>
+                </th>
               </tr>
             </thead>
             <tbody>
@@ -1250,7 +1286,125 @@
             </tbody>
           </table>
         </div>
+        <div class="chart-container" style="min-height: 360px; margin-top: 1rem;">
+          <canvas id="areaVarianceChart" aria-label="Variance by area chart"></canvas>
+        </div>
       `;
+
+      renderAreaVarianceChart(rows, currentMode);
+    }
+
+    function changeAreaSort(column) {
+      if (areaSort.column === column) {
+        areaSort.direction = areaSort.direction === 'asc' ? 'desc' : 'asc';
+      } else {
+        areaSort = { column, direction: column === 'area' ? 'asc' : 'desc' };
+      }
+
+      renderAreaVarianceSummary();
+    }
+
+    function renderAreaSortIndicator(column) {
+      if (areaSort.column !== column) return '';
+      return areaSort.direction === 'asc' ? '▲' : '▼';
+    }
+
+    function sortAreaRows(rows = []) {
+      const { column, direction } = areaSort;
+      const multiplier = direction === 'asc' ? 1 : -1;
+
+      const getValue = (row) => {
+        if (column === 'area') return row.area || '';
+        if (column === 'budget_hours') return Number(row.budget_hours) || 0;
+        if (column === 'actual_hours') return Number(row.actual_hours) || 0;
+        if (column === 'variance_percent') return Number.isFinite(row.variance_percent) ? row.variance_percent : -Infinity;
+        return Number(row.variance_hours) || 0;
+      };
+
+      return [...rows].sort((a, b) => {
+        const aVal = getValue(a);
+        const bVal = getValue(b);
+
+        if (typeof aVal === 'string' || typeof bVal === 'string') {
+          return aVal.localeCompare(bVal) * multiplier;
+        }
+
+        return (aVal - bVal) * multiplier;
+      });
+    }
+
+    function renderAreaVarianceChart(rows = [], mode = 'hours') {
+      const canvas = document.getElementById('areaVarianceChart');
+
+      if (areaVarianceChart) {
+        areaVarianceChart.destroy();
+      }
+
+      if (!canvas || !rows.length) {
+        areaVarianceChart = null;
+        return;
+      }
+
+      const labels = rows.map(row => row.area);
+      const values = rows.map(row => {
+        if (mode === 'percent') {
+          return Number.isFinite(row.variance_percent) ? row.variance_percent : 0;
+        }
+        return row.variance_hours;
+      });
+
+      const colors = values.map((_, index) => {
+        const rawValue = mode === 'percent'
+          ? (Number.isFinite(rows[index].variance_percent) ? rows[index].variance_percent : 0)
+          : rows[index].variance_hours;
+        return rawValue >= 0 ? 'rgba(239, 68, 68, 0.8)' : 'rgba(34, 197, 94, 0.8)';
+      });
+
+      const yLabel = mode === 'percent' ? 'Percent' : 'Hours';
+      const dataLabel = mode === 'percent' ? 'Variance (%)' : 'Variance (hrs)';
+
+      areaVarianceChart = new Chart(canvas, {
+        type: 'bar',
+        data: {
+          labels,
+          datasets: [{
+            label: dataLabel,
+            data: values,
+            backgroundColor: colors,
+            borderColor: colors.map(color => color.replace('0.8', '1')),
+            borderWidth: 1
+          }]
+        },
+        options: {
+          responsive: true,
+          maintainAspectRatio: false,
+          plugins: {
+            legend: { display: false },
+            tooltip: {
+              callbacks: {
+                label: (context) => {
+                  const row = rows[context.dataIndex];
+                  const percent = Number.isFinite(row.variance_percent) ? `${row.variance_percent.toFixed(1)}%` : 'N/A';
+                  if (mode === 'percent') {
+                    return `${percent}`;
+                  }
+                  return `${formatHours(row.variance_hours)} hrs (${percent})`;
+                }
+              }
+            }
+          },
+          scales: {
+            x: {
+              ticks: { autoSkip: false },
+              grid: { display: false }
+            },
+            y: {
+              beginAtZero: true,
+              title: { display: true, text: yLabel }
+            }
+          }
+        }
+      });
     }
 
     async function handleAreaMappingChange(budgetKey, targetKey) {
