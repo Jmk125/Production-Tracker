@@ -230,6 +230,29 @@
       </div>
 
       <div class="card" style="margin-top: 1.25rem;">
+        <div class="card-header" style="align-items: flex-start;">
+          <div>
+            <h3 class="card-title" style="margin-bottom: 0.25rem;">Buildings / Areas</h3>
+            <p style="color: var(--text-secondary); font-size: 0.9rem;">Match budget areas to payroll jobs and make manual hour adjustments when needed.</p>
+          </div>
+          <button class="chip" type="button" onclick="loadAreaData()">Refresh</button>
+        </div>
+
+        <div class="grid grid-2" style="gap: 1rem; align-items: start;">
+          <div>
+            <h4 style="margin-bottom: 0.5rem;">Budget → Payroll matching</h4>
+            <p style="color: var(--text-secondary); font-size: 0.9rem; margin-bottom: 0.75rem;">We suggest matches automatically, but you can pick the payroll job to tie each budget area to.</p>
+            <div id="areaMappingList"></div>
+          </div>
+
+          <div>
+            <h4 style="margin-bottom: 0.5rem;">Hours by building/job</h4>
+            <div id="areaComparison" style="margin-top: 0.25rem;"></div>
+          </div>
+        </div>
+      </div>
+
+      <div class="card" style="margin-top: 1.25rem;">
         <div class="card-header">
           <h3 class="card-title">Cost Code Breakdown</h3>
           <div style="color: var(--text-secondary); font-size: 0.9rem;">Budget vs. time entry hours</div>
@@ -284,6 +307,7 @@
     let selectedJobs = new Set();
     let budgetData = null;
     let budgetComparison = [];
+    let areaData = { comparison: [], budgetAreas: [], actualAreas: [], mappings: {}, adjustments: { budget: {}, actual: {} } };
     let budgetSort = { column: 'variance_hours', direction: 'desc' };
     let hoursChart = null;
     let payClassChart = null;
@@ -296,6 +320,7 @@
       await loadDetailedStats();
       await loadMonthlyStats();
       await loadBudgetData();
+      await loadAreaData();
       await loadUploads();
       setupUploadArea();
       setupBudgetUploadArea();
@@ -357,14 +382,28 @@
         const response = await fetch(`/api/projects/${projectId}/budget`);
         budgetData = await response.json();
         budgetComparison = budgetData.comparison || [];
+        areaData = budgetData.areaComparison || areaData;
 
         renderBudgetSummary();
         renderBudgetUploads(budgetData.uploads || []);
         renderBudgetBreakdown();
         renderBudgetCharts();
+        renderAreaSection();
       } catch (error) {
         console.error('Error loading budget data:', error);
         document.getElementById('budgetSummary').textContent = 'Unable to load budget data.';
+      }
+    }
+
+    async function loadAreaData() {
+      try {
+        const response = await fetch(`/api/projects/${projectId}/areas`);
+        if (response.ok) {
+          areaData = await response.json();
+          renderAreaSection();
+        }
+      } catch (error) {
+        console.error('Error loading area data:', error);
       }
     }
 
@@ -1071,6 +1110,144 @@
       });
     }
 
+    function renderAreaSection() {
+      renderAreaMappings();
+      renderAreaComparison();
+    }
+
+    function renderAreaMappings() {
+      const container = document.getElementById('areaMappingList');
+      if (!container) return;
+
+      if (!areaData || !areaData.budgetAreas.length) {
+        container.innerHTML = '<p style="color: var(--text-secondary);">Upload a budget with area names to start matching.</p>';
+        return;
+      }
+
+      const options = areaData.actualAreas || [];
+      const optionHtml = options.map(area => `<option value="${area.key}">${escapeHtml(area.label)} (${formatHours(area.hours)} hrs)</option>`).join('');
+
+      container.innerHTML = areaData.budgetAreas.map(area => {
+        const selected = areaData.mappings?.[area.key] || (options.find(o => o.key === area.key)?.key || '');
+        return `
+          <div class="file-item" style="align-items: center; gap: 0.75rem;">
+            <div style="flex: 1;">
+              <div style="font-weight: 600;">${escapeHtml(area.label)}</div>
+              <div style="color: var(--text-secondary); font-size: 0.85rem;">${formatHours(area.hours)} budgeted hours</div>
+            </div>
+            <div>
+              <label style="font-size: 0.85rem; color: var(--text-secondary);">Match to payroll job</label>
+              <select onchange="handleAreaMappingChange('${area.key}', this.value)" style="margin-top: 0.35rem; padding: 0.4rem; min-width: 220px;">
+                <option value="">Use budget name</option>
+                ${optionHtml}
+              </select>
+            </div>
+          </div>
+        `;
+      }).join('');
+
+      // set selected values after rendering
+      areaData.budgetAreas.forEach(area => {
+        const select = container.querySelector(`select[onchange*="${area.key}"]`);
+        if (select) {
+          const selected = areaData.mappings?.[area.key] || (options.find(o => o.key === area.key)?.key || '');
+          select.value = selected;
+        }
+      });
+    }
+
+    function renderAreaComparison() {
+      const container = document.getElementById('areaComparison');
+      if (!container) return;
+
+      if (!areaData || !areaData.comparison || areaData.comparison.length === 0) {
+        container.innerHTML = '<p style="color: var(--text-secondary);">Upload a budget and add payroll entries to compare by building.</p>';
+        return;
+      }
+
+      container.innerHTML = `
+        <div style="overflow-x: auto;">
+          <table class="area-table">
+            <thead>
+              <tr>
+                <th class="area-cell">Area</th>
+                <th class="number-cell">Budgeted</th>
+                <th class="number-cell">Spent</th>
+                <th class="number-cell">Variance</th>
+                <th class="number-cell">Adjust budget</th>
+                <th class="number-cell">Adjust spent</th>
+              </tr>
+            </thead>
+            <tbody>
+              ${areaData.comparison.map(row => `
+                <tr>
+                  <td class="area-cell">${escapeHtml(row.area)}</td>
+                  <td class="number-cell">${formatHours(row.budget_hours)}</td>
+                  <td class="number-cell">${formatHours(row.actual_hours)}</td>
+                  <td class="variance-cell">
+                    <div class="variance-value">${formatVarianceBadge(row.variance_hours)}</div>
+                    <div class="variance-percent">${formatPercentVariance(row.variance_percent)}</div>
+                  </td>
+                  <td class="adjust-cell">
+                    <div class="adjust-inputs">
+                      <input type="number" step="0.1" data-adjust-input="budget-${row.key}" value="${areaData.adjustments?.budget?.[row.key] ?? ''}" aria-label="Adjust budget hours for ${escapeHtml(row.area)}">
+                      <button class="chip" type="button" onclick="saveAreaAdjustment('${row.key}', 'budget')">Save</button>
+                    </div>
+                  </td>
+                  <td class="adjust-cell">
+                    <div class="adjust-inputs">
+                      <input type="number" step="0.1" data-adjust-input="actual-${row.key}" value="${areaData.adjustments?.actual?.[row.key] ?? ''}" aria-label="Adjust spent hours for ${escapeHtml(row.area)}">
+                      <button class="chip" type="button" onclick="saveAreaAdjustment('${row.key}', 'actual')">Save</button>
+                    </div>
+                  </td>
+                </tr>
+              `).join('')}
+            </tbody>
+          </table>
+        </div>
+      `;
+    }
+
+    async function handleAreaMappingChange(budgetKey, targetKey) {
+      try {
+        const response = await fetch(`/api/projects/${projectId}/areas/mappings`, {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ mappings: { [budgetKey]: targetKey } })
+        });
+        if (response.ok) {
+          areaData = await response.json();
+          renderAreaSection();
+        }
+      } catch (error) {
+        console.error('Error saving area mapping:', error);
+      }
+    }
+
+    async function saveAreaAdjustment(areaKey, type) {
+      const input = document.querySelector(`[data-adjust-input="${type}-${areaKey}"]`);
+      if (!input) return;
+
+      const value = parseFloat(input.value);
+      const payload = type === 'budget'
+        ? { budgetAdjustments: { [areaKey]: Number.isFinite(value) ? value : 0 } }
+        : { actualAdjustments: { [areaKey]: Number.isFinite(value) ? value : 0 } };
+
+      try {
+        const response = await fetch(`/api/projects/${projectId}/areas/adjustments`, {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify(payload)
+        });
+        if (response.ok) {
+          areaData = await response.json();
+          renderAreaSection();
+        }
+      } catch (error) {
+        console.error('Error saving area adjustment:', error);
+      }
+    }
+
     function updateChart() {
       const viewType = document.getElementById('viewType').value;
       const stacked = document.getElementById('stackToggle').checked;
@@ -1506,12 +1683,12 @@
       resultDiv.innerHTML = '';
 
       try {
-        const costCodeHours = await parseBudgetFile(file);
+        const { costCodeHours, areaHours } = await parseBudgetFile(file);
 
         const response = await fetch(`/api/projects/${projectId}/budget`, {
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({ filename: file.name, costCodeHours })
+          body: JSON.stringify({ filename: file.name, costCodeHours, areaHours })
         });
 
         const result = await response.json();
@@ -1524,6 +1701,8 @@
           renderBudgetUploads(result.uploads || []);
           renderBudgetBreakdown();
           renderBudgetCharts();
+          areaData = result.areaComparison || areaData;
+          renderAreaSection();
 
           resultDiv.innerHTML = `
             <div class="alert alert-success">
@@ -1557,7 +1736,7 @@
 
   const buffer = await file.arrayBuffer();
   const workbook = XLSX.read(buffer, { type: 'array' });
-  
+
   // Use first sheet (should be the budget sheet)
   const sheetName = workbook.SheetNames[0];
   const sheet = workbook.Sheets[sheetName];
@@ -1570,28 +1749,31 @@
   // Column B is index 1 (0-based), Column I is index 8
   const costCodeIndex = 1;  // Column B
   const hoursIndex = 8;      // Column I
+  const areaIndex = 0;       // Column A for building/job name
 
   const totals = {};
+  const areaTotals = {};
   let rowsProcessed = 0;
-  
+
   // Start from row 1 to skip any header rows
   for (let i = 1; i < rows.length; i++) {
     const row = rows[i];
     if (!row || row.length <= hoursIndex) continue;
-    
+
     const rawCode = row[costCodeIndex];
     const rawHours = row[hoursIndex];
-    
+    const rawArea = row[areaIndex];
+
     // Skip if either value is missing or empty
     if (!rawCode || rawCode === '') continue;
-    
+
     // Skip "Total" rows (cost code contains "Total")
     if (rawCode.toString().toLowerCase().includes('total')) continue;
-    
+
     // Skip division header rows (cost codes without dashes like "01", "06", "07")
     const codeStr = rawCode.toString().trim();
     if (codeStr.match(/^\d{2}$/)) continue;
-    
+
     const hours = parseFloat(rawHours);
     const normalizedCode = normalizeCostCodeClient(rawCode);
 
@@ -1599,6 +1781,12 @@
     if (!normalizedCode || !Number.isFinite(hours)) continue;
 
     totals[normalizedCode] = (totals[normalizedCode] || 0) + hours;
+
+    if (rawArea && rawArea.toString().trim() !== '') {
+      const areaLabel = rawArea.toString().trim();
+      areaTotals[areaLabel] = (areaTotals[areaLabel] || 0) + hours;
+    }
+
     rowsProcessed++;
   }
 
@@ -1607,7 +1795,7 @@
   }
 
   console.log(`Successfully parsed ${Object.keys(totals).length} unique cost codes from ${rowsProcessed} rows in sheet "${sheetName}"`);
-  return totals;
+  return { costCodeHours: totals, areaHours: areaTotals };
 }
 
     function switchTab(evt, tabName) {

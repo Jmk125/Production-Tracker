@@ -10,7 +10,8 @@ const {
   uploadQueries,
   budgetQueries,
   timeEntryQueries,
-  comparisonQueries
+  comparisonQueries,
+  areaQueries
 } = require('./database');
 
 const { parsePayrollPDF } = require('./pdfParser');
@@ -35,6 +36,11 @@ function normalizeCostCode(value) {
   const [mainPart] = value.toString().split('.');
   const numeric = mainPart.replace(/\D/g, '').trim();
   return numeric || null;
+}
+
+function normalizeJobLabel(value) {
+  if (!value) return 'unspecified';
+  return value.toString().trim().toLowerCase();
 }
 
 // Align budget codes to payroll codes by matching on numeric prefixes
@@ -85,6 +91,89 @@ async function buildBudgetComparison(projectId, latestBudget = null) {
   }).sort((a, b) => a.cost_code.localeCompare(b.cost_code));
 
   return { comparison, latestBudget: budgetUploads[0] || null, budgetUploads };
+}
+
+async function buildAreaComparison(projectId, latestBudget = null) {
+  const [latestBudgetUpload, areaConfig, jobTotals] = await Promise.all([
+    latestBudget ? Promise.resolve(latestBudget) : budgetQueries.getLatestByProject(projectId),
+    areaQueries.getByProject(projectId),
+    timeEntryQueries.getJobTotals(projectId)
+  ]);
+
+  const budgetAreasRaw = latestBudgetUpload?.area_hours || {};
+  const budgetAreas = Object.entries(budgetAreasRaw).map(([label, hours]) => ({
+    key: normalizeJobLabel(label),
+    label,
+    hours: Number(hours) || 0
+  })).filter(area => area.key);
+
+  const actualTotals = jobTotals.totals || {};
+  const actualLabels = jobTotals.labels || {};
+
+  const budgetAggregated = {};
+  const labelMap = { ...actualLabels };
+
+  const mappings = areaConfig.mappings || {};
+  const adjustments = areaConfig.adjustments || { budget: {}, actual: {} };
+
+  budgetAreas.forEach(area => {
+    const mappedKey = mappings[area.key] || (actualTotals[area.key] !== undefined ? area.key : null);
+    const targetKey = mappedKey || area.key;
+    budgetAggregated[targetKey] = (budgetAggregated[targetKey] || 0) + area.hours;
+    if (!labelMap[targetKey]) {
+      labelMap[targetKey] = mappedKey && actualLabels[mappedKey]
+        ? actualLabels[mappedKey]
+        : area.label;
+    }
+  });
+
+  Object.entries(adjustments.budget || {}).forEach(([key, hours]) => {
+    const normalized = normalizeJobLabel(key);
+    budgetAggregated[normalized] = (budgetAggregated[normalized] || 0) + (Number(hours) || 0);
+    if (!labelMap[normalized]) labelMap[normalized] = key;
+  });
+
+  const actualAggregated = { ...actualTotals };
+  Object.entries(adjustments.actual || {}).forEach(([key, hours]) => {
+    const normalized = normalizeJobLabel(key);
+    actualAggregated[normalized] = (actualAggregated[normalized] || 0) + (Number(hours) || 0);
+    if (!labelMap[normalized]) labelMap[normalized] = key;
+  });
+
+  const allKeys = new Set([
+    ...Object.keys(budgetAggregated),
+    ...Object.keys(actualAggregated)
+  ]);
+
+  const comparison = Array.from(allKeys).map(key => {
+    const budget = budgetAggregated[key] || 0;
+    const actual = actualAggregated[key] || 0;
+    const variance = actual - budget;
+    const variancePercent = budget > 0 ? (variance / budget) * 100 : null;
+
+    return {
+      key,
+      area: labelMap[key] || key,
+      budget_hours: budget,
+      actual_hours: actual,
+      variance_hours: variance,
+      variance_percent: variancePercent
+    };
+  }).sort((a, b) => a.area.localeCompare(b.area));
+
+  const actualAreas = Object.keys(actualTotals).map(key => ({
+    key,
+    label: actualLabels[key] || key,
+    hours: actualTotals[key] || 0
+  })).sort((a, b) => a.label.localeCompare(b.label));
+
+  return {
+    comparison,
+    budgetAreas,
+    actualAreas,
+    mappings,
+    adjustments
+  };
 }
 
 // Configure multer for file uploads
@@ -234,7 +323,7 @@ app.post('/api/projects/:id/upload', upload.single('payroll'), async (req, res) 
 app.post('/api/projects/:id/budget', async (req, res) => {
   try {
     const projectId = req.params.id;
-    const { filename, costCodeHours } = req.body;
+    const { filename, costCodeHours, areaHours } = req.body;
 
     if (!costCodeHours || typeof costCodeHours !== 'object') {
       return res.status(400).json({ error: 'No budget data provided' });
@@ -252,8 +341,19 @@ app.post('/api/projects/:id/budget', async (req, res) => {
       return res.status(400).json({ error: 'No valid cost code hours found in upload' });
     }
 
-    const result = await budgetQueries.create(projectId, filename || 'Budget Upload', normalizedHours);
-    const { comparison, latestBudget, budgetUploads } = await buildBudgetComparison(projectId, { cost_code_hours: normalizedHours });
+    const areaHoursClean = {};
+    if (areaHours && typeof areaHours === 'object') {
+      Object.entries(areaHours).forEach(([name, hours]) => {
+        if (!name) return;
+        const numericHours = parseFloat(hours);
+        if (!Number.isFinite(numericHours)) return;
+        areaHoursClean[name.trim()] = (areaHoursClean[name.trim()] || 0) + numericHours;
+      });
+    }
+
+    const result = await budgetQueries.create(projectId, filename || 'Budget Upload', normalizedHours, areaHoursClean);
+    const { comparison, latestBudget, budgetUploads } = await buildBudgetComparison(projectId, { cost_code_hours: normalizedHours, area_hours: areaHoursClean });
+    const areaComparison = await buildAreaComparison(projectId, { area_hours: areaHoursClean });
 
     res.json({
       success: true,
@@ -261,7 +361,8 @@ app.post('/api/projects/:id/budget', async (req, res) => {
       codesTracked: Object.keys(normalizedHours).length,
       uploads: budgetUploads,
       latest: latestBudget,
-      comparison
+      comparison,
+      areaComparison
     });
   } catch (error) {
     console.error('Error saving budget:', error);
@@ -273,14 +374,53 @@ app.post('/api/projects/:id/budget', async (req, res) => {
 app.get('/api/projects/:id/budget', async (req, res) => {
   try {
     const { comparison, latestBudget, budgetUploads } = await buildBudgetComparison(req.params.id);
+    const areaComparison = await buildAreaComparison(req.params.id);
     res.json({
       uploads: budgetUploads,
       latest: latestBudget,
-      comparison
+      comparison,
+      areaComparison
     });
   } catch (error) {
     console.error('Error fetching budget data:', error);
     res.status(500).json({ error: 'Failed to fetch budget data' });
+  }
+});
+
+// Get building/area comparison
+app.get('/api/projects/:id/areas', async (req, res) => {
+  try {
+    const areaData = await buildAreaComparison(req.params.id);
+    res.json(areaData);
+  } catch (error) {
+    console.error('Error fetching area data:', error);
+    res.status(500).json({ error: 'Failed to fetch area comparison' });
+  }
+});
+
+// Save area mappings
+app.post('/api/projects/:id/areas/mappings', async (req, res) => {
+  try {
+    const { mappings } = req.body;
+    await areaQueries.saveMappings(req.params.id, mappings || {});
+    const areaData = await buildAreaComparison(req.params.id);
+    res.json(areaData);
+  } catch (error) {
+    console.error('Error saving area mappings:', error);
+    res.status(500).json({ error: 'Failed to save area mappings' });
+  }
+});
+
+// Save area adjustments
+app.post('/api/projects/:id/areas/adjustments', async (req, res) => {
+  try {
+    const { budgetAdjustments, actualAdjustments } = req.body;
+    await areaQueries.saveAdjustments(req.params.id, budgetAdjustments || {}, actualAdjustments || {});
+    const areaData = await buildAreaComparison(req.params.id);
+    res.json(areaData);
+  } catch (error) {
+    console.error('Error saving area adjustments:', error);
+    res.status(500).json({ error: 'Failed to save area adjustments' });
   }
 });
 
