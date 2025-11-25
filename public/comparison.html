@@ -45,7 +45,7 @@
         <div class="card" style="margin-bottom: 1.5rem;">
             <div class="card-header">
               <h3 class="card-title">Timeline Comparison</h3>
-              <div style="display: flex; gap: 1rem;">
+              <div style="display: flex; gap: 1rem; flex-wrap: wrap; justify-content: flex-end;">
               <select id="timelineType" onchange="updateCharts()">
                 <option value="project">Project Timeline (Month 1, 2, 3...)</option>
                 <option value="calendar">Calendar Timeline</option>
@@ -59,6 +59,11 @@
                 <option value="division09">09 Package (Division 09 only)</option>
                 <option value="package06Combo">06 Package (Div 06, 08, 10, 11, 12)</option>
                 <option value="packageComparison">Packages: 09 vs 06/08/10/11/12</option>
+              </select>
+              <select id="averageCurveMode" onchange="updateCharts()">
+                <option value="none">Show actual only</option>
+                <option value="overlay">Overlay average curve</option>
+                <option value="replace">Average curve only</option>
               </select>
             </div>
           </div>
@@ -379,9 +384,11 @@
         comparisonChart.destroy();
       }
 
-      const chartData = timelineType === 'project'
+      let chartData = timelineType === 'project'
         ? buildProjectTimelineChart(data, viewType)
         : buildCalendarTimelineChart(data, viewType);
+
+      chartData = applyAverageCurve(chartData);
 
       comparisonChart = new Chart(ctx, {
         type: 'line',
@@ -719,15 +726,67 @@
       };
     }
 
+    function applyAverageCurve(chartData) {
+      const mode = document.getElementById('averageCurveMode')?.value || 'none';
+      if (mode === 'none' || !chartData?.datasets?.length) {
+        return chartData;
+      }
+
+      const baseDatasets = chartData.datasets.map(dataset => ({
+        ...dataset,
+        data: (dataset.data || []).map(value => Number(value) || 0)
+      }));
+
+      const labelCount = chartData.labels?.length || 0;
+      const totals = Array(labelCount).fill(0);
+      const counts = Array(labelCount).fill(0);
+
+      baseDatasets.forEach(dataset => {
+        dataset.data.forEach((value, index) => {
+          if (Number.isFinite(value)) {
+            totals[index] += value;
+            counts[index] += 1;
+          }
+        });
+      });
+
+      const averages = totals.map((sum, index) => counts[index]
+        ? Number((sum / counts[index]).toFixed(2))
+        : 0
+      );
+
+      const averageDataset = {
+        label: 'Average',
+        data: averages,
+        borderColor: 'rgba(16, 24, 40, 0.8)',
+        backgroundColor: 'rgba(16, 24, 40, 0.08)',
+        borderWidth: 3,
+        tension: 0.35,
+        pointRadius: 0,
+        pointHoverRadius: 0,
+        borderDash: [6, 6],
+        fill: false
+      };
+
+      if (mode === 'replace') {
+        return { ...chartData, datasets: [averageDataset] };
+      }
+
+      return { ...chartData, datasets: [...baseDatasets, averageDataset] };
+    }
+
     function renderMetrics() {
       const metricsGrid = document.getElementById('metricsGrid');
       
       const metrics = comparisonData.map(project => {
-        const totalHours = project.data.reduce((sum, entry) => sum + entry.total_hours, 0);
+        const totalHours = project.data.reduce((sum, entry) => sum + (Number(entry.total_hours) || 0), 0);
         const uniqueEmployees = new Set(project.data.map(e => e.employee_name)).size;
         const costCodes = new Set(project.data.map(e => e.cost_code).filter(Boolean)).size;
         const projectMonths = Math.max(...project.data.map(e => e.project_month));
-        const avgHoursPerMonth = totalHours / projectMonths;
+        const avgHoursPerMonth = projectMonths ? totalHours / projectMonths : 0;
+        const budgetedHours = Number(project.budgetSummary?.budgetedHours) || null;
+        const spentHours = Number(project.budgetSummary?.actualHours);
+        const varianceHours = Number(project.budgetSummary?.varianceHours);
 
         return {
           name: project.data[0]?.project_name || `Project ${project.projectId}`,
@@ -735,7 +794,10 @@
           uniqueEmployees,
           costCodes,
           projectMonths,
-          avgHoursPerMonth
+          avgHoursPerMonth,
+          budgetedHours,
+          spentHours,
+          varianceHours
         };
       });
 
@@ -769,6 +831,20 @@
                 <div style="color: var(--text-secondary); font-size: 0.75rem;">Cost Codes</div>
               </div>
             </div>
+            <div style="display: grid; grid-template-columns: repeat(auto-fit, minmax(140px, 1fr)); gap: 0.75rem; padding-top: 0.75rem; border-top: 1px solid var(--border-color);">
+              <div>
+                <div style="font-weight: 600;">${m.budgetedHours !== null ? m.budgetedHours.toLocaleString() : '—'}</div>
+                <div style="color: var(--text-secondary); font-size: 0.75rem;">Budgeted Hours</div>
+              </div>
+              <div>
+                <div style="font-weight: 600;">${m.spentHours !== undefined && m.spentHours !== null ? m.spentHours.toLocaleString() : '—'}</div>
+                <div style="color: var(--text-secondary); font-size: 0.75rem;">Spent Hours</div>
+              </div>
+              <div>
+                <div style="font-weight: 600; color: ${m.varianceHours >= 0 ? 'var(--danger-color, #ef4444)' : 'var(--success-color, #22c55e)'};">${m.varianceHours !== undefined && m.varianceHours !== null ? m.varianceHours.toLocaleString() : '—'}</div>
+                <div style="color: var(--text-secondary); font-size: 0.75rem;">Delta (Spent - Budget)</div>
+              </div>
+            </div>
           </div>
         </div>
       `).join('');
@@ -800,7 +876,7 @@
         if (!monthlyTotals[month]) {
           monthlyTotals[month] = 0;
         }
-        monthlyTotals[month] += entry.total_hours;
+        monthlyTotals[month] += Number(entry.total_hours) || 0;
       });
 
       const color = getColor(colorIndex);
@@ -835,7 +911,8 @@
           }
 
           const month = entry[monthKey];
-          categoryTotals[key].totals[month] = (categoryTotals[key].totals[month] || 0) + entry.total_hours;
+          const hours = Number(entry.total_hours) || 0;
+          categoryTotals[key].totals[month] = (categoryTotals[key].totals[month] || 0) + hours;
         });
 
         Object.values(categoryTotals).forEach((catData, catIndex) => {
@@ -881,7 +958,8 @@
             if (!divisions.includes(division)) return;
 
             const month = entry[monthKey];
-            monthlyTotals[month] = (monthlyTotals[month] || 0) + entry.total_hours;
+            const hours = Number(entry.total_hours) || 0;
+            monthlyTotals[month] = (monthlyTotals[month] || 0) + hours;
           });
 
           const color = getColor((projectIndex * packageKeys.length) + pkgIndex);
