@@ -159,6 +159,7 @@
     let selectedComparisonCostCodes = new Set();
     let comparisonChart = null;
     let employeeComparisonChart = null;
+    let costCodeVarianceChart = null;
     const chartColors = [
       'rgba(37, 99, 235, 1)',
       'rgba(34, 197, 94, 1)',
@@ -391,7 +392,7 @@
       const filteredData = getFilteredComparisonData();
       updateComparisonChart(filteredData);
       updateEmployeeChart(filteredData);
-      renderCostCodeVarianceTable(filteredData);
+      renderCostCodeVarianceChart(filteredData);
     }
 
     function updateComparisonChart(data = comparisonData) {
@@ -848,20 +849,20 @@
       };
     }
 
-    function renderCostCodeVarianceTable(data = comparisonData) {
+    function renderCostCodeVarianceChart(data = comparisonData) {
       const container = document.getElementById('costCodeVarianceTable');
       const card = document.getElementById('costCodeVarianceCard');
       if (!container || !card) return;
+
+      if (costCodeVarianceChart) {
+        costCodeVarianceChart.destroy();
+        costCodeVarianceChart = null;
+      }
 
       if (!data.length) {
         card.style.display = 'none';
         return;
       }
-
-      const projectHeaders = data.map(project => ({
-        id: project.projectId,
-        name: project.data[0]?.project_name || getProjectName(project.projectId)
-      }));
 
       const costCodes = new Set();
       data.forEach(project => {
@@ -883,50 +884,87 @@
       }
 
       const sortedCodes = Array.from(costCodes).sort();
+      const datasets = data.map((project, index) => {
+        const color = getColor(index);
+        const rowsByCode = {};
 
-      const tableRows = sortedCodes.map(code => {
-        const projectCells = data.map(project => {
+        const values = sortedCodes.map(code => {
           const match = (project.budgetComparison || []).find(row => normalizeCostCodeLabel(row.cost_code) === code);
-
-          if (!match) {
-            return '<td style="padding: 0.6rem; text-align: right; min-width: 180px;">—</td>';
+          if (match) {
+            rowsByCode[code] = match;
           }
+          return match ? Number(match.variance_hours) || 0 : null;
+        });
 
-          return `
-            <td style="padding: 0.6rem; min-width: 180px;">
-              <div style="display: grid; gap: 0.25rem;">
-                <div style="font-weight: 600;">Budget: ${formatHours(match.budget_hours)}</div>
-                <div>Spent: ${formatHours(match.actual_hours)}</div>
-                <div style="margin-top: 0.25rem;">${formatVarianceBadge(match.variance_hours)}</div>
-                <div style="color: var(--text-secondary); font-size: 0.85rem;">${formatPercentVariance(match.variance_percent)}</div>
-              </div>
-            </td>
-          `;
-        }).join('');
+        return {
+          label: project.data[0]?.project_name || getProjectName(project.projectId),
+          data: values,
+          backgroundColor: color.replace('1)', '0.72)'),
+          borderColor: color,
+          borderWidth: 1,
+          costCodeRows: rowsByCode
+        };
+      });
 
-        return `
-          <tr style="border-bottom: 1px solid var(--border-color);">
-            <td style="padding: 0.6rem; font-weight: 600;">${escapeHtml(code)}</td>
-            ${projectCells}
-          </tr>
-        `;
-      }).join('');
+      const allValues = datasets.flatMap(ds => ds.data.filter(v => Number.isFinite(v)));
+      const suggestedMin = allValues.length ? Math.min(0, Math.min(...allValues) * 1.1) : 0;
+      const suggestedMax = allValues.length ? Math.max(0, Math.max(...allValues) * 1.1) : 0;
 
       container.innerHTML = `
-        <div style="overflow-x: auto;">
-          <table style="width: 100%; border-collapse: collapse;">
-            <thead>
-              <tr style="border-bottom: 2px solid var(--border-color);">
-                <th style="padding: 0.6rem; text-align: left;">Cost Code</th>
-                ${projectHeaders.map(project => `<th style="padding: 0.6rem; text-align: left; min-width: 180px;">${escapeHtml(project.name)}</th>`).join('')}
-              </tr>
-            </thead>
-            <tbody>
-              ${tableRows}
-            </tbody>
-          </table>
+        <div class="chart-container" style="min-height: 380px;">
+          <canvas id="costCodeVarianceChart"></canvas>
         </div>
       `;
+
+      const ctx = document.getElementById('costCodeVarianceChart');
+      costCodeVarianceChart = new Chart(ctx, {
+        type: 'bar',
+        data: {
+          labels: sortedCodes,
+          datasets
+        },
+        options: {
+          responsive: true,
+          maintainAspectRatio: false,
+          plugins: {
+            legend: { position: 'top' },
+            tooltip: {
+              callbacks: {
+                label: (context) => {
+                  const code = context.label;
+                  const row = context.dataset.costCodeRows?.[code];
+                  const varianceHours = context.parsed.y;
+                  const varianceLabel = Number.isFinite(varianceHours)
+                    ? varianceHours.toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })
+                    : '—';
+
+                  if (!row) return `${context.dataset.label}: ${varianceLabel} hrs`;
+
+                  const budget = formatHours(row.budget_hours);
+                  const actual = formatHours(row.actual_hours);
+                  const percent = formatPercentVariance(row.variance_percent);
+                  return `${context.dataset.label} – ${code}: ${varianceLabel} hrs (Budget: ${budget}, Spent: ${actual}, %: ${percent})`;
+                }
+              }
+            }
+          },
+          scales: {
+            x: {
+              stacked: false,
+              ticks: {
+                autoSkip: false,
+                maxRotation: 60,
+                minRotation: 30
+              }
+            },
+            y: {
+              title: { display: true, text: 'Variance (hrs)' },
+              suggestedMin,
+              suggestedMax
+            }
+          }
+        }
+      });
     }
 
     function renderMetrics() {
