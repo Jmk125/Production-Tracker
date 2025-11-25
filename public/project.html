@@ -1728,75 +1728,108 @@
       }
     }
 
-    // FIXED: Updated budget parser to read from columns D and K
+    // Budget parser: reads cost codes from column B, hours from column I, and tracks areas based on job numbers in column B + area names in column C
     async function parseBudgetFile(file) {
-  if (typeof XLSX === 'undefined') {
-    throw new Error('Spreadsheet parser not available.');
-  }
+      if (typeof XLSX === 'undefined') {
+        throw new Error('Spreadsheet parser not available.');
+      }
 
-  const buffer = await file.arrayBuffer();
-  const workbook = XLSX.read(buffer, { type: 'array' });
+      const buffer = await file.arrayBuffer();
+      const workbook = XLSX.read(buffer, { type: 'array' });
 
-  // Use first sheet (should be the budget sheet)
-  const sheetName = workbook.SheetNames[0];
-  const sheet = workbook.Sheets[sheetName];
-  const rows = XLSX.utils.sheet_to_json(sheet, { header: 1, defval: '' });
+      // Use first sheet (should be the budget sheet)
+      const sheetName = workbook.SheetNames[0];
+      const sheet = workbook.Sheets[sheetName];
+      const rows = XLSX.utils.sheet_to_json(sheet, { header: 1, defval: '' });
 
-  if (!rows.length) {
-    throw new Error('The spreadsheet is empty.');
-  }
+      if (!rows.length) {
+        throw new Error('The spreadsheet is empty.');
+      }
 
-  // Column B is index 1 (0-based), Column I is index 8
-  const costCodeIndex = 1;  // Column B
-  const hoursIndex = 8;      // Column I
-  const areaIndex = 0;       // Column A for building/job name
+      // Column B is index 1 (0-based), Column I is index 8
+      const costCodeIndex = 1; // Column B
+      const hoursIndex = 8; // Column I
+      const areaNameIndex = 2; // Column C contains building/area names when paired with a job number in column B
 
-  const totals = {};
-  const areaTotals = {};
-  let rowsProcessed = 0;
+      const totals = {};
+      const areaTotals = {};
+      let rowsProcessed = 0;
+      let currentArea = null;
+      let mainJobPrefix = null;
 
-  // Start from row 1 to skip any header rows
-  for (let i = 1; i < rows.length; i++) {
-    const row = rows[i];
-    if (!row || row.length <= hoursIndex) continue;
+      const looksLikeJobNumber = (value) => {
+        if (value === undefined || value === null) return false;
+        return /^\d+(?:\.\d+)?$/.test(value.toString().trim());
+      };
 
-    const rawCode = row[costCodeIndex];
-    const rawHours = row[hoursIndex];
-    const rawArea = row[areaIndex];
+      // Start from row 1 to skip any header rows
+      for (let i = 1; i < rows.length; i++) {
+        const row = rows[i];
+        if (!row || row.length <= Math.max(costCodeIndex, hoursIndex)) continue;
 
-    // Skip if either value is missing or empty
-    if (!rawCode || rawCode === '') continue;
+        const rawCode = row[costCodeIndex];
+        const rawHours = row[hoursIndex];
 
-    // Skip "Total" rows (cost code contains "Total")
-    if (rawCode.toString().toLowerCase().includes('total')) continue;
+        // Capture the overall job prefix (first 4 digits) when we see a "Job" label row
+        if (typeof rawCode === 'string' && rawCode.trim().toLowerCase() === 'job') {
+          const possibleJobNumber = row[areaNameIndex];
+          if (looksLikeJobNumber(possibleJobNumber)) {
+            const jobDigits = possibleJobNumber.toString().trim().replace(/[^0-9]/g, '');
+            mainJobPrefix = jobDigits.slice(0, 4) || null;
+          }
+          continue;
+        }
 
-    // Skip division header rows (cost codes without dashes like "01", "06", "07")
-    const codeStr = rawCode.toString().trim();
-    if (codeStr.match(/^\d{2}$/)) continue;
+        // Capture the current area when we encounter a job number in column B with a name in column C
+        if (looksLikeJobNumber(rawCode) && row[areaNameIndex]) {
+          const jobDigits = rawCode.toString().trim().replace(/[^0-9]/g, '');
+          const matchesMainJob = mainJobPrefix ? jobDigits.startsWith(mainJobPrefix) : true;
 
-    const hours = parseFloat(rawHours);
-    const normalizedCode = normalizeCostCodeClient(rawCode);
+          if (!matchesMainJob) {
+            continue;
+          }
 
-    // Only process if we have a valid cost code and numeric hours
-    if (!normalizedCode || !Number.isFinite(hours)) continue;
+          const areaLabel = row[areaNameIndex].toString().trim();
+          if (areaLabel && !areaLabel.toLowerCase().includes('total')) {
+            currentArea = areaLabel;
+          }
+          continue;
+        }
 
-    totals[normalizedCode] = (totals[normalizedCode] || 0) + hours;
+        // Skip if either value is missing or empty
+        if (!rawCode || rawCode === '') continue;
 
-    if (rawArea && rawArea.toString().trim() !== '') {
-      const areaLabel = rawArea.toString().trim();
-      areaTotals[areaLabel] = (areaTotals[areaLabel] || 0) + hours;
+        // Skip "Total" rows (cost code contains "Total")
+        const codeStr = rawCode.toString().trim();
+        if (codeStr.toLowerCase().includes('total')) continue;
+
+        // Skip division header rows (cost codes without dashes like "01", "06", "07")
+        if (codeStr.match(/^\d{2}$/)) continue;
+
+        const hours = parseFloat(rawHours);
+        const normalizedCode = normalizeCostCodeClient(rawCode);
+
+        // Only process if we have a valid cost code and numeric hours
+        if (!normalizedCode || !Number.isFinite(hours)) continue;
+
+        totals[normalizedCode] = (totals[normalizedCode] || 0) + hours;
+
+        if (currentArea) {
+          areaTotals[currentArea] = (areaTotals[currentArea] || 0) + hours;
+        }
+
+        rowsProcessed++;
+      }
+
+      if (Object.keys(totals).length === 0) {
+        throw new Error(`No valid cost codes with labor hours were found. Processed ${rowsProcessed} rows from sheet "${sheetName}".`);
+      }
+
+      console.log(
+        `Successfully parsed ${Object.keys(totals).length} unique cost codes from ${rowsProcessed} rows in sheet "${sheetName}"`
+      );
+      return { costCodeHours: totals, areaHours: areaTotals };
     }
-
-    rowsProcessed++;
-  }
-
-  if (Object.keys(totals).length === 0) {
-    throw new Error(`No valid cost codes with labor hours were found. Processed ${rowsProcessed} rows from sheet "${sheetName}".`);
-  }
-
-  console.log(`Successfully parsed ${Object.keys(totals).length} unique cost codes from ${rowsProcessed} rows in sheet "${sheetName}"`);
-  return { costCodeHours: totals, areaHours: areaTotals };
-}
 
     function switchTab(evt, tabName) {
       // Update tab buttons
