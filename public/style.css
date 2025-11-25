@@ -145,6 +145,18 @@ nav a:hover, nav a.active {
   grid-template-columns: repeat(auto-fill, minmax(350px, 1fr));
 }
 
+.area-layout {
+  gap: 1rem;
+  align-items: start;
+  grid-template-columns: minmax(340px, 1fr) minmax(560px, 1.35fr);
+}
+
+@media (max-width: 1024px) {
+  .area-layout {
+    grid-template-columns: 1fr;
+  }
+}
+
 .project-card {
   cursor: pointer;
   transition: all 0.2s;
@@ -573,6 +585,7 @@ nav a:hover, nav a.active {
 /* Area comparison table */
 .area-table {
   width: 100%;
+  min-width: 960px;
   border-collapse: collapse;
   table-layout: fixed;
 }
