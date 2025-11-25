@@ -122,6 +122,17 @@
           </div>
         </div>
 
+        <div class="card" id="costCodeVarianceCard" style="margin-bottom: 1.5rem; display: none;">
+          <div class="card-header" style="align-items: flex-start;">
+            <div>
+              <h3 class="card-title">Cost Code Variance</h3>
+              <div style="color: var(--text-secondary); font-size: 0.9rem;">Spent vs. budgeted hours by cost code</div>
+            </div>
+            <div style="color: var(--text-secondary); font-size: 0.9rem;">Respects cost code filters</div>
+          </div>
+          <div id="costCodeVarianceTable"></div>
+        </div>
+
         <div id="metricsComparison" style="display: none;">
           <div class="card">
             <h3 class="card-title" style="margin-bottom: 1rem;">Comparative Metrics</h3>
@@ -148,6 +159,7 @@
     let selectedComparisonCostCodes = new Set();
     let comparisonChart = null;
     let employeeComparisonChart = null;
+    let costCodeVarianceChart = null;
     const chartColors = [
       'rgba(37, 99, 235, 1)',
       'rgba(34, 197, 94, 1)',
@@ -239,6 +251,10 @@
       comparisonData.forEach(project => {
         project.data.forEach(entry => {
           uniqueCodes.add(normalizeCostCodeLabel(entry.cost_code));
+        });
+
+        (project.budgetComparison || []).forEach(row => {
+          uniqueCodes.add(normalizeCostCodeLabel(row.cost_code));
         });
       });
 
@@ -376,6 +392,7 @@
       const filteredData = getFilteredComparisonData();
       updateComparisonChart(filteredData);
       updateEmployeeChart(filteredData);
+      renderCostCodeVarianceChart(filteredData);
     }
 
     function updateComparisonChart(data = comparisonData) {
@@ -505,6 +522,7 @@
           ...project,
           data: [],
           rawEntries: project.rawEntries || [],
+          budgetComparison: [],
           employeeStats: buildEmployeeStatsFromEntries([], project.projectStartDate)
         }));
       }
@@ -512,11 +530,13 @@
       return comparisonData.map(project => {
         const filteredEntries = filterBySelectedCostCodes(project.data);
         const filteredRawEntries = filterRawEntriesByCostCode(project.rawEntries || []);
+        const filteredBudget = filterBudgetRows(project.budgetComparison || []);
 
         return {
           ...project,
           data: filteredEntries,
           rawEntries: filteredRawEntries,
+          budgetComparison: filteredBudget,
           employeeStats: buildEmployeeStatsFromEntries(filteredRawEntries, project.projectStartDate)
         };
       });
@@ -530,6 +550,11 @@
     function filterRawEntriesByCostCode(entries) {
       if (!selectedComparisonCostCodes.size) return [];
       return entries.filter(entry => selectedComparisonCostCodes.has(normalizeCostCodeLabel(entry.cost_code)));
+    }
+
+    function filterBudgetRows(rows) {
+      if (!selectedComparisonCostCodes.size) return [];
+      return rows.filter(row => selectedComparisonCostCodes.has(normalizeCostCodeLabel(row.cost_code)));
     }
 
     function buildEmployeeStatsFromEntries(entries, projectStartDate) {
@@ -824,6 +849,124 @@
       };
     }
 
+    function renderCostCodeVarianceChart(data = comparisonData) {
+      const container = document.getElementById('costCodeVarianceTable');
+      const card = document.getElementById('costCodeVarianceCard');
+      if (!container || !card) return;
+
+      if (costCodeVarianceChart) {
+        costCodeVarianceChart.destroy();
+        costCodeVarianceChart = null;
+      }
+
+      if (!data.length) {
+        card.style.display = 'none';
+        return;
+      }
+
+      const costCodes = new Set();
+      data.forEach(project => {
+        (project.budgetComparison || []).forEach(row => {
+          costCodes.add(normalizeCostCodeLabel(row.cost_code));
+        });
+      });
+
+      card.style.display = 'block';
+
+      if (!selectedComparisonCostCodes.size) {
+        container.innerHTML = '<p style="color: var(--text-secondary);">Select cost codes to see variance.</p>';
+        return;
+      }
+
+      if (!costCodes.size) {
+        container.innerHTML = '<p style="color: var(--text-secondary);">No variance data for the selected cost codes yet.</p>';
+        return;
+      }
+
+      const sortedCodes = Array.from(costCodes).sort();
+      const datasets = data.map((project, index) => {
+        const color = getColor(index);
+        const rowsByCode = {};
+
+        const values = sortedCodes.map(code => {
+          const match = (project.budgetComparison || []).find(row => normalizeCostCodeLabel(row.cost_code) === code);
+          if (match) {
+            rowsByCode[code] = match;
+          }
+          return match ? Number(match.variance_hours) || 0 : null;
+        });
+
+        return {
+          label: project.data[0]?.project_name || getProjectName(project.projectId),
+          data: values,
+          backgroundColor: color.replace('1)', '0.72)'),
+          borderColor: color,
+          borderWidth: 1,
+          costCodeRows: rowsByCode
+        };
+      });
+
+      const allValues = datasets.flatMap(ds => ds.data.filter(v => Number.isFinite(v)));
+      const suggestedMin = allValues.length ? Math.min(0, Math.min(...allValues) * 1.1) : 0;
+      const suggestedMax = allValues.length ? Math.max(0, Math.max(...allValues) * 1.1) : 0;
+
+      container.innerHTML = `
+        <div class="chart-container" style="min-height: 380px;">
+          <canvas id="costCodeVarianceChart"></canvas>
+        </div>
+      `;
+
+      const ctx = document.getElementById('costCodeVarianceChart');
+      costCodeVarianceChart = new Chart(ctx, {
+        type: 'bar',
+        data: {
+          labels: sortedCodes,
+          datasets
+        },
+        options: {
+          responsive: true,
+          maintainAspectRatio: false,
+          plugins: {
+            legend: { position: 'top' },
+            tooltip: {
+              callbacks: {
+                label: (context) => {
+                  const code = context.label;
+                  const row = context.dataset.costCodeRows?.[code];
+                  const varianceHours = context.parsed.y;
+                  const varianceLabel = Number.isFinite(varianceHours)
+                    ? varianceHours.toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })
+                    : '—';
+
+                  if (!row) return `${context.dataset.label}: ${varianceLabel} hrs`;
+
+                  const budget = formatHours(row.budget_hours);
+                  const actual = formatHours(row.actual_hours);
+                  const percent = formatPercentVariance(row.variance_percent);
+                  return `${context.dataset.label} – ${code}: ${varianceLabel} hrs (Budget: ${budget}, Spent: ${actual}, %: ${percent})`;
+                }
+              }
+            }
+          },
+          scales: {
+            x: {
+              stacked: false,
+              ticks: {
+                autoSkip: false,
+                maxRotation: 60,
+                minRotation: 30
+              }
+            },
+            y: {
+              title: { display: true, text: 'Variance (hrs)' },
+              suggestedMin,
+              suggestedMax
+            }
+          }
+        }
+      });
+    }
+
     function renderMetrics() {
       const metricsGrid = document.getElementById('metricsGrid');
       
@@ -899,6 +1042,11 @@
       `).join('');
     }
 
+    function getProjectName(projectId) {
+      const match = allProjects.find(p => Number(p.id) === Number(projectId));
+      return match ? match.name : `Project ${projectId}`;
+    }
+
     function formatDate(dateStr) {
       if (!dateStr) return '';
       const date = new Date(dateStr + 'T00:00:00');
@@ -909,6 +1057,24 @@
       const [year, month] = monthStr.split('-');
       const date = new Date(year, month - 1);
       return date.toLocaleDateString('en-US', { month: 'short', year: 'numeric' });
+    }
+
+    function formatHours(value) {
+      if (value === null || value === undefined || Number.isNaN(value)) return '—';
+      return Number(value || 0).toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 });
+    }
+
+    function formatVarianceBadge(value) {
+      const numeric = Number(value || 0);
+      const sign = numeric > 0 ? '+' : '';
+      const color = numeric > 0 ? '#ef4444' : numeric < 0 ? '#22c55e' : '#0f172a';
+      return `<span style="font-weight: 700; color: ${color};">${sign}${numeric.toFixed(2)}</span>`;
+    }
+
+    function formatPercentVariance(value) {
+      if (value === null || value === undefined || Number.isNaN(value)) return '—';
+      const sign = value > 0 ? '+' : '';
+      return `${sign}${Number(value).toFixed(1)}%`;
     }
 
     function normalizeCostCodeLabel(code) {

@@ -495,6 +495,7 @@ app.post('/api/comparison/timeline', async (req, res) => {
           rawEntries,
           projectStartDate,
           employeeStats,
+          budgetComparison,
           budgetSummary: {
             budgetedHours: totalBudgetHours,
             actualHours: totalActualHours,
