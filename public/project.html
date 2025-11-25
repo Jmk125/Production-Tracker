@@ -1129,10 +1129,16 @@
       }
 
       const options = areaData.actualAreas || [];
-      const optionHtml = options.map(area => `<option value="${area.key}">${escapeHtml(area.label)} (${formatHours(area.hours)} hrs)</option>`).join('');
+      const mappedTargets = new Set(
+        Object.values(areaData.mappings || {}).filter(Boolean)
+      );
 
       container.innerHTML = areaData.budgetAreas.map(area => {
         const selected = areaData.mappings?.[area.key] || (options.find(o => o.key === area.key)?.key || '');
+        const optionHtml = options
+          .filter(option => !mappedTargets.has(option.key) || option.key === selected)
+          .map(option => `<option value="${option.key}">${escapeHtml(option.label)} (${formatHours(option.hours)} hrs)</option>`)
+          .join('');
         return `
           <div class="file-item" style="align-items: center; gap: 0.75rem;">
             <div style="flex: 1;">
