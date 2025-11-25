@@ -60,11 +60,17 @@
                 <option value="package06Combo">06 Package (Div 06, 08, 10, 11, 12)</option>
                 <option value="packageComparison">Packages: 09 vs 06/08/10/11/12</option>
               </select>
-              <select id="averageCurveMode" onchange="updateCharts()">
-                <option value="none">Show actual only</option>
-                <option value="overlay">Overlay average curve</option>
-                <option value="replace">Average curve only</option>
-              </select>
+              <div style="display: flex; gap: 0.75rem; align-items: center; flex-wrap: wrap;">
+                <select id="averageCurveMode" onchange="updateCharts()">
+                  <option value="actual">Show actual only</option>
+                  <option value="average">Average curves</option>
+                  <option value="overlay">Actual with average overlay</option>
+                </select>
+                <label class="checkbox" style="margin: 0;">
+                  <input type="checkbox" id="combinedAverageToggle" checked onchange="updateCharts()">
+                  Include combined average
+                </label>
+              </div>
             </div>
           </div>
           <div id="comparisonFilterPanel" class="filter-bar" style="display: none;">
@@ -727,8 +733,10 @@
     }
 
     function applyAverageCurve(chartData) {
-      const mode = document.getElementById('averageCurveMode')?.value || 'none';
-      if (mode === 'none' || !chartData?.datasets?.length) {
+      const mode = document.getElementById('averageCurveMode')?.value || 'actual';
+      const includeCombined = document.getElementById('combinedAverageToggle')?.checked;
+
+      if (mode === 'actual' || !chartData?.datasets?.length) {
         return chartData;
       }
 
@@ -737,7 +745,54 @@
         data: (dataset.data || []).map(value => Number(value) || 0)
       }));
 
-      const labelCount = chartData.labels?.length || 0;
+      const projectAverageDatasets = baseDatasets.map(dataset => {
+        const baseBackground = typeof dataset.backgroundColor === 'string'
+          ? dataset.backgroundColor
+          : 'rgba(16, 24, 40, 0.2)';
+
+        return {
+          ...dataset,
+          label: `${dataset.label} Average`,
+          data: buildRollingAverage(dataset.data),
+          backgroundColor: baseBackground.replace('1)', '0.08)'),
+          borderDash: [6, 4],
+          tension: 0.35,
+          pointRadius: 0,
+          pointHoverRadius: 0,
+          fill: false
+        };
+      });
+
+      const combinedAverageDataset = includeCombined
+        ? buildCombinedAverageDataset(baseDatasets, chartData.labels?.length || 0)
+        : null;
+
+      if (mode === 'average') {
+        const datasets = [...projectAverageDatasets];
+        if (combinedAverageDataset) datasets.push(combinedAverageDataset);
+        return { ...chartData, datasets };
+      }
+
+      const overlayDatasets = [...baseDatasets, ...projectAverageDatasets];
+      if (combinedAverageDataset) overlayDatasets.push(combinedAverageDataset);
+
+      return { ...chartData, datasets: overlayDatasets };
+    }
+
+    function buildRollingAverage(values) {
+      if (!Array.isArray(values) || !values.length) return [];
+
+      return values.map((_, index) => {
+        const start = Math.max(0, index - 1);
+        const end = Math.min(values.length, index + 2);
+        const slice = values.slice(start, end).filter(Number.isFinite);
+        if (!slice.length) return 0;
+        const avg = slice.reduce((sum, value) => sum + value, 0) / slice.length;
+        return Number(avg.toFixed(2));
+      });
+    }
+
+    function buildCombinedAverageDataset(baseDatasets, labelCount) {
       const totals = Array(labelCount).fill(0);
       const counts = Array(labelCount).fill(0);
 
@@ -755,24 +810,18 @@
         : 0
       );
 
-      const averageDataset = {
-        label: 'Average',
+      return {
+        label: 'Combined Average',
         data: averages,
-        borderColor: 'rgba(16, 24, 40, 0.8)',
-        backgroundColor: 'rgba(16, 24, 40, 0.08)',
+        borderColor: 'rgba(16, 24, 40, 0.9)',
+        backgroundColor: 'rgba(16, 24, 40, 0.12)',
         borderWidth: 3,
         tension: 0.35,
         pointRadius: 0,
         pointHoverRadius: 0,
-        borderDash: [6, 6],
+        borderDash: [8, 6],
         fill: false
       };
-
-      if (mode === 'replace') {
-        return { ...chartData, datasets: [averageDataset] };
-      }
-
-      return { ...chartData, datasets: [...baseDatasets, averageDataset] };
     }
 
     function renderMetrics() {
