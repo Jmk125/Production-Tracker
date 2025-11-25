@@ -1755,6 +1755,7 @@
       const areaTotals = {};
       let rowsProcessed = 0;
       let currentArea = null;
+      let mainJobPrefix = null;
 
       const looksLikeJobNumber = (value) => {
         if (value === undefined || value === null) return false;
@@ -1769,8 +1770,25 @@
         const rawCode = row[costCodeIndex];
         const rawHours = row[hoursIndex];
 
+        // Capture the overall job prefix (first 4 digits) when we see a "Job" label row
+        if (typeof rawCode === 'string' && rawCode.trim().toLowerCase() === 'job') {
+          const possibleJobNumber = row[areaNameIndex];
+          if (looksLikeJobNumber(possibleJobNumber)) {
+            const jobDigits = possibleJobNumber.toString().trim().replace(/[^0-9]/g, '');
+            mainJobPrefix = jobDigits.slice(0, 4) || null;
+          }
+          continue;
+        }
+
         // Capture the current area when we encounter a job number in column B with a name in column C
         if (looksLikeJobNumber(rawCode) && row[areaNameIndex]) {
+          const jobDigits = rawCode.toString().trim().replace(/[^0-9]/g, '');
+          const matchesMainJob = mainJobPrefix ? jobDigits.startsWith(mainJobPrefix) : true;
+
+          if (!matchesMainJob) {
+            continue;
+          }
+
           const areaLabel = row[areaNameIndex].toString().trim();
           if (areaLabel && !areaLabel.toLowerCase().includes('total')) {
             currentArea = areaLabel;
