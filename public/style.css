@@ -145,6 +145,18 @@ nav a:hover, nav a.active {
   grid-template-columns: repeat(auto-fill, minmax(350px, 1fr));
 }
 
+.area-layout {
+  gap: 1rem;
+  align-items: start;
+  grid-template-columns: minmax(340px, 1fr) minmax(560px, 1.35fr);
+}
+
+@media (max-width: 1024px) {
+  .area-layout {
+    grid-template-columns: 1fr;
+  }
+}
+
 .project-card {
   cursor: pointer;
   transition: all 0.2s;
@@ -568,6 +580,77 @@ nav a:hover, nav a.active {
 .chip:hover {
   background: #e0e7ff;
   border-color: #a5b4fc;
+}
+
+/* Area comparison table */
+.area-table {
+  width: 100%;
+  min-width: 960px;
+  border-collapse: collapse;
+  table-layout: fixed;
+}
+
+.area-table thead th {
+  padding: 0.55rem 0.6rem;
+  text-align: left;
+  color: var(--text-secondary);
+  font-weight: 600;
+  border-bottom: 2px solid var(--border-color);
+  background: #f8fafc;
+}
+
+.area-table thead th.number-cell {
+  text-align: right;
+}
+
+.area-table tbody td {
+  padding: 0.65rem 0.6rem;
+  border-bottom: 1px solid var(--border-color);
+  vertical-align: middle;
+}
+
+.area-table .area-cell {
+  text-align: left;
+  font-weight: 600;
+  word-break: break-word;
+}
+
+.area-table .number-cell {
+  text-align: right;
+  white-space: nowrap;
+}
+
+.area-table .variance-cell {
+  text-align: right;
+  white-space: nowrap;
+  display: flex;
+  flex-direction: column;
+  align-items: flex-end;
+  gap: 0.15rem;
+}
+
+.area-table .variance-percent {
+  color: var(--text-secondary);
+  font-size: 0.8rem;
+}
+
+.area-table .adjust-cell {
+  min-width: 170px;
+}
+
+.adjust-inputs {
+  display: inline-flex;
+  gap: 0.45rem;
+  justify-content: flex-end;
+  align-items: center;
+  width: 100%;
+}
+
+.adjust-inputs input[type="number"] {
+  width: 96px;
+  padding: 0.4rem 0.45rem;
+  border: 1px solid var(--border-color);
+  border-radius: 0.35rem;
 }
 
 .chip input[type="checkbox"] {

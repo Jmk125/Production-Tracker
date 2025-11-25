@@ -6,12 +6,18 @@ const PROJECTS_FILE = path.join(DATA_DIR, 'projects.json');
 const UPLOADS_FILE = path.join(DATA_DIR, 'uploads.json');
 const ENTRIES_FILE = path.join(DATA_DIR, 'entries.json');
 const BUDGETS_FILE = path.join(DATA_DIR, 'budgets.json');
+const AREAS_FILE = path.join(DATA_DIR, 'areas.json');
 
 function normalizeCostCode(value) {
   if (value === undefined || value === null) return null;
   const [mainPart] = value.toString().split('.');
   const numeric = mainPart.replace(/\D/g, '').trim();
   return numeric || null;
+}
+
+function normalizeJobLabel(value) {
+  if (!value) return 'unspecified';
+  return value.toString().trim().toLowerCase();
 }
 
 // Initialize data directory and files
@@ -34,6 +40,10 @@ function initDatabase() {
 
   if (!fs.existsSync(BUDGETS_FILE)) {
     fs.writeFileSync(BUDGETS_FILE, JSON.stringify([]));
+  }
+
+  if (!fs.existsSync(AREAS_FILE)) {
+    fs.writeFileSync(AREAS_FILE, JSON.stringify([]));
   }
 
   console.log('Database initialized successfully');
@@ -136,13 +146,14 @@ const uploadQueries = {
 
 // Budget queries
 const budgetQueries = {
-  create: async (project_id, filename, cost_code_hours) => {
+  create: async (project_id, filename, cost_code_hours, area_hours = {}) => {
     const budgets = readJSON(BUDGETS_FILE);
     const newBudget = {
       id: budgets.length > 0 ? Math.max(...budgets.map(b => b.id)) + 1 : 1,
       project_id: parseInt(project_id),
       filename,
       cost_code_hours,
+      area_hours,
       upload_date: new Date().toISOString()
     };
 
@@ -303,6 +314,84 @@ const timeEntryQueries = {
     });
 
     return totals;
+  },
+
+  getJobTotals: async (project_id) => {
+    const entries = readJSON(ENTRIES_FILE);
+    const projectEntries = entries.filter(e => e.project_id === parseInt(project_id));
+
+    const totals = {};
+    const labels = {};
+
+    projectEntries.forEach(entry => {
+      const key = normalizeJobLabel(entry.job_description);
+      if (!key) return;
+
+      totals[key] = (totals[key] || 0) + (Number(entry.hours) || 0);
+      if (!labels[key] && entry.job_description) {
+        labels[key] = entry.job_description;
+      }
+    });
+
+    return { totals, labels };
+  }
+};
+
+const areaQueries = {
+  getByProject: async (project_id) => {
+    const areas = readJSON(AREAS_FILE);
+    return areas.find(a => a.project_id === parseInt(project_id)) || {
+      project_id: parseInt(project_id),
+      mappings: {},
+      adjustments: { budget: {}, actual: {} }
+    };
+  },
+
+  saveMappings: async (project_id, mappings = {}) => {
+    const areas = readJSON(AREAS_FILE);
+    const index = areas.findIndex(a => a.project_id === parseInt(project_id));
+
+    const existing = index !== -1 ? areas[index] : {
+      project_id: parseInt(project_id),
+      mappings: {},
+      adjustments: { budget: {}, actual: {} }
+    };
+
+    existing.mappings = { ...existing.mappings, ...mappings };
+
+    if (index !== -1) {
+      areas[index] = existing;
+    } else {
+      areas.push(existing);
+    }
+
+    writeJSON(AREAS_FILE, areas);
+    return existing;
+  },
+
+  saveAdjustments: async (project_id, budgetAdjustments = {}, actualAdjustments = {}) => {
+    const areas = readJSON(AREAS_FILE);
+    const index = areas.findIndex(a => a.project_id === parseInt(project_id));
+
+    const existing = index !== -1 ? areas[index] : {
+      project_id: parseInt(project_id),
+      mappings: {},
+      adjustments: { budget: {}, actual: {} }
+    };
+
+    existing.adjustments = {
+      budget: { ...existing.adjustments.budget, ...budgetAdjustments },
+      actual: { ...existing.adjustments.actual, ...actualAdjustments }
+    };
+
+    if (index !== -1) {
+      areas[index] = existing;
+    } else {
+      areas.push(existing);
+    }
+
+    writeJSON(AREAS_FILE, areas);
+    return existing;
   }
 };
 
@@ -407,5 +496,6 @@ module.exports = {
   uploadQueries,
   budgetQueries,
   timeEntryQueries,
-  comparisonQueries
+  comparisonQueries,
+  areaQueries
 };
