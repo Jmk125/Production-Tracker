@@ -334,6 +334,38 @@ const timeEntryQueries = {
     });
 
     return { totals, labels };
+  },
+
+  getJobCostCodeTotals: async (project_id) => {
+    const entries = readJSON(ENTRIES_FILE);
+    const projectEntries = entries.filter(e => e.project_id === parseInt(project_id));
+
+    const result = {};
+
+    projectEntries.forEach(entry => {
+      const jobKey = normalizeJobLabel(entry.job_description);
+      if (!jobKey) return;
+
+      const costCode = normalizeCostCode(entry.cost_code) || 'Unspecified';
+      const hours = Number(entry.hours) || 0;
+
+      if (!result[jobKey]) {
+        result[jobKey] = {
+          label: entry.job_description || jobKey,
+          costCodes: {},
+          total: 0
+        };
+      }
+
+      result[jobKey].costCodes[costCode] = (result[jobKey].costCodes[costCode] || 0) + hours;
+      result[jobKey].total += hours;
+
+      if (!result[jobKey].label && entry.job_description) {
+        result[jobKey].label = entry.job_description;
+      }
+    });
+
+    return result;
   }
 };
 

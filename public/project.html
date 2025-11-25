@@ -1221,6 +1221,8 @@
     function renderAreaVarianceSummary() {
       const container = document.getElementById('areaVarianceSummary');
       const currentMode = document.getElementById('areaVarianceChartMode')?.value || 'hours';
+      const viewMode = document.getElementById('areaVarianceViewMode')?.value || 'area';
+      const stackBars = document.getElementById('areaVarianceStackToggle')?.checked ?? true;
       if (!container) return;
 
       if (!areaData || !Array.isArray(areaData.comparison) || areaData.comparison.length === 0) {
@@ -1240,12 +1242,20 @@
             <h4 style="margin: 0;">Variance by area</h4>
             <span style="color: var(--text-secondary); font-size: 0.9rem;">From budget import areas</span>
           </div>
-          <div style="display: inline-flex; gap: 0.5rem; align-items: center;">
+          <div style="display: inline-flex; gap: 0.5rem; align-items: center; flex-wrap: wrap; justify-content: flex-end;">
             <label for="areaVarianceChartMode" style="font-size: 0.9rem; color: var(--text-secondary);">Display</label>
             <select id="areaVarianceChartMode" onchange="renderAreaVarianceSummary()">
               <option value="hours" ${currentMode === 'hours' ? 'selected' : ''}>Variance (hours)</option>
               <option value="percent" ${currentMode === 'percent' ? 'selected' : ''}>Variance (%)</option>
             </select>
+            <label for="areaVarianceViewMode" style="font-size: 0.9rem; color: var(--text-secondary);">View</label>
+            <select id="areaVarianceViewMode" onchange="renderAreaVarianceSummary()">
+              <option value="area" ${viewMode === 'area' ? 'selected' : ''}>Area totals</option>
+              <option value="costCode" ${viewMode === 'costCode' ? 'selected' : ''}>By cost code</option>
+            </select>
+            <label style="display: inline-flex; align-items: center; gap: 0.35rem; font-size: 0.9rem; color: var(--text-secondary);">
+              <input type="checkbox" id="areaVarianceStackToggle" ${stackBars ? 'checked' : ''} onchange="renderAreaVarianceSummary()"> Stack bars
+            </label>
           </div>
         </div>
         <div style="overflow-x: auto;">
@@ -1280,15 +1290,29 @@
               </tr>
             </thead>
             <tbody>
-              ${rows.map(row => `
-                <tr style="border-bottom: 1px solid var(--border-color);">
-                  <td style="padding: 0.6rem; font-weight: 600;">${escapeHtml(row.area)}</td>
-                  <td style="padding: 0.6rem; text-align: right;">${formatHours(row.budget_hours)}</td>
-                  <td style="padding: 0.6rem; text-align: right;">${formatHours(row.actual_hours)}</td>
-                  <td style="padding: 0.6rem; text-align: right;">${formatVarianceBadge(row.variance_hours)}</td>
-                  <td style="padding: 0.6rem; text-align: right;">${formatPercentVariance(row.variance_percent)}</td>
-                </tr>
-              `).join('')}
+              ${rows.map(row => {
+                const breakdown = areaData.costCodeBreakdown?.[row.key]?.entries || [];
+                const hasBreakdown = breakdown.length > 0;
+                return `
+                  <tr style="border-bottom: 1px solid var(--border-color);">
+                    <td style="padding: 0.6rem; font-weight: 600;">
+                      <div style="display: inline-flex; align-items: center; gap: 0.35rem;">
+                        ${hasBreakdown ? `<button class="collapse-toggle" type="button" data-breakdown-toggle="${row.key}" onclick="toggleAreaBreakdown('${row.key}')">Show breakdown</button>` : ''}
+                        <span>${escapeHtml(row.area)}</span>
+                      </div>
+                    </td>
+                    <td style="padding: 0.6rem; text-align: right;">${formatHours(row.budget_hours)}</td>
+                    <td style="padding: 0.6rem; text-align: right;">${formatHours(row.actual_hours)}</td>
+                    <td style="padding: 0.6rem; text-align: right;">${formatVarianceBadge(row.variance_hours)}</td>
+                    <td style="padding: 0.6rem; text-align: right;">${formatPercentVariance(row.variance_percent)}</td>
+                  </tr>
+                  <tr data-breakdown-row="${row.key}" style="display: none; background: #f8fafc;">
+                    <td colspan="5" style="padding: 0.35rem 0.6rem 0.6rem 2.2rem;">
+                      ${renderCostCodeBreakdown(row)}
+                    </td>
+                  </tr>
+                `;
+              }).join('')}
             </tbody>
           </table>
         </div>
@@ -1297,7 +1321,7 @@
         </div>
       `;
 
-      renderAreaVarianceChart(rows, currentMode);
+      renderAreaVarianceChart(rows, currentMode, viewMode, stackBars);
     }
 
     function changeAreaSort(column) {
@@ -1339,7 +1363,56 @@
       });
     }
 
-    function renderAreaVarianceChart(rows = [], mode = 'hours') {
+    function toggleAreaBreakdown(key) {
+      const row = document.querySelector(`[data-breakdown-row="${key}"]`);
+      const toggle = document.querySelector(`[data-breakdown-toggle="${key}"]`);
+      if (!row) return;
+
+      const shouldShow = row.style.display === 'none' || row.style.display === '';
+      row.style.display = shouldShow ? 'table-row' : 'none';
+      if (toggle) {
+        toggle.textContent = shouldShow ? 'Hide breakdown' : 'Show breakdown';
+      }
+    }
+
+    function renderCostCodeBreakdown(row) {
+      const breakdown = areaData.costCodeBreakdown?.[row.key];
+      if (!breakdown || !Array.isArray(breakdown.entries) || breakdown.entries.length === 0) {
+        return '<div class="empty-breakdown">No cost code detail for this area yet.</div>';
+      }
+
+      const rowsHtml = breakdown.entries.map(entry => `
+        <tr>
+          <td class="area-cell">${escapeHtml(entry.cost_code)}</td>
+          <td class="number-cell">${formatHours(entry.budget_hours)}</td>
+          <td class="number-cell">${formatHours(entry.actual_hours)}</td>
+          <td class="number-cell">${formatVarianceBadge(entry.variance_hours)}</td>
+          <td class="number-cell">${formatPercentVariance(entry.variance_percent)}</td>
+        </tr>
+      `).join('');
+
+      return `
+        <div class="breakdown-table-wrapper">
+          <div class="breakdown-title">Cost code breakdown for ${escapeHtml(row.area)}</div>
+          <table class="breakdown-table">
+            <thead>
+              <tr>
+                <th style="text-align: left;">Cost code</th>
+                <th class="number-cell">Budgeted</th>
+                <th class="number-cell">Spent</th>
+                <th class="number-cell">Variance</th>
+                <th class="number-cell">% Var</th>
+              </tr>
+            </thead>
+            <tbody>
+              ${rowsHtml}
+            </tbody>
+          </table>
+        </div>
+      `;
+    }
+
+    function renderAreaVarianceChart(rows = [], mode = 'hours', viewMode = 'area', stackBars = true) {
       const canvas = document.getElementById('areaVarianceChart');
 
       if (areaVarianceChart) {
@@ -1352,44 +1425,87 @@
       }
 
       const labels = rows.map(row => row.area);
-      const values = rows.map(row => {
-        if (mode === 'percent') {
-          return Number.isFinite(row.variance_percent) ? row.variance_percent : 0;
-        }
-        return row.variance_hours;
-      });
-
-      const colors = values.map((_, index) => {
-        const rawValue = mode === 'percent'
-          ? (Number.isFinite(rows[index].variance_percent) ? rows[index].variance_percent : 0)
-          : rows[index].variance_hours;
-        return rawValue >= 0 ? 'rgba(239, 68, 68, 0.8)' : 'rgba(34, 197, 94, 0.8)';
-      });
-
       const yLabel = mode === 'percent' ? 'Percent' : 'Hours';
       const dataLabel = mode === 'percent' ? 'Variance (%)' : 'Variance (hrs)';
+
+      const breakdownMap = areaData.costCodeBreakdown || {};
+
+      const costCodes = viewMode === 'costCode'
+        ? Array.from(new Set(rows.flatMap(row => (breakdownMap[row.key]?.entries || []).map(entry => entry.cost_code)))).sort()
+        : [];
+
+      const datasets = viewMode === 'costCode' && costCodes.length
+        ? costCodes.map((code, index) => {
+            const data = rows.map(row => {
+              const entry = (breakdownMap[row.key]?.entries || []).find(item => item.cost_code === code);
+              if (!entry) return 0;
+              if (mode === 'percent') {
+                return Number.isFinite(entry.variance_percent) ? entry.variance_percent : 0;
+              }
+              return entry.variance_hours;
+            });
+
+            const color = buildColorPalette(costCodes.length)[index];
+
+            return {
+              label: code,
+              data,
+              backgroundColor: color,
+              borderColor: color,
+              borderWidth: 1,
+              stack: stackBars ? 'stack' : undefined
+            };
+          })
+        : [{
+            label: dataLabel,
+            data: rows.map(row => mode === 'percent'
+              ? (Number.isFinite(row.variance_percent) ? row.variance_percent : 0)
+              : row.variance_hours
+            ),
+            backgroundColor: rows.map((row) => {
+              const rawValue = mode === 'percent'
+                ? (Number.isFinite(row.variance_percent) ? row.variance_percent : 0)
+                : row.variance_hours;
+              return rawValue >= 0 ? 'rgba(239, 68, 68, 0.8)' : 'rgba(34, 197, 94, 0.8)';
+            }),
+            borderColor: rows.map((row) => {
+              const rawValue = mode === 'percent'
+                ? (Number.isFinite(row.variance_percent) ? row.variance_percent : 0)
+                : row.variance_hours;
+              const base = rawValue >= 0 ? 'rgba(239, 68, 68, 1)' : 'rgba(34, 197, 94, 1)';
+              return base;
+            }),
+            borderWidth: 1
+          }];
 
       areaVarianceChart = new Chart(canvas, {
         type: 'bar',
         data: {
           labels,
-          datasets: [{
-            label: dataLabel,
-            data: values,
-            backgroundColor: colors,
-            borderColor: colors.map(color => color.replace('0.8', '1')),
-            borderWidth: 1
-          }]
+          datasets
         },
         options: {
           responsive: true,
           maintainAspectRatio: false,
           plugins: {
-            legend: { display: false },
+            legend: { display: viewMode === 'costCode' },
             tooltip: {
               callbacks: {
                 label: (context) => {
                   const row = rows[context.dataIndex];
+
+                  if (viewMode === 'costCode') {
+                    const costCode = context.dataset.label;
+                    const entry = (breakdownMap[row.key]?.entries || []).find(item => item.cost_code === costCode);
+                    const percent = entry && Number.isFinite(entry.variance_percent)
+                      ? `${entry.variance_percent.toFixed(1)}%`
+                      : 'N/A';
+
+                    if (!entry) return `${costCode}: 0`;
+                    if (mode === 'percent') return `${costCode}: ${percent}`;
+                    return `${costCode}: ${formatHours(entry.variance_hours)} hrs (Budget ${formatHours(entry.budget_hours)}, Actual ${formatHours(entry.actual_hours)})`;
+                  }
+
                   const percent = Number.isFinite(row.variance_percent) ? `${row.variance_percent.toFixed(1)}%` : 'N/A';
                   if (mode === 'percent') {
                     return `${percent}`;
@@ -1402,15 +1518,26 @@
           scales: {
             x: {
               ticks: { autoSkip: false },
-              grid: { display: false }
+              grid: { display: false },
+              stacked: viewMode === 'costCode' && stackBars
             },
             y: {
               beginAtZero: true,
-              title: { display: true, text: yLabel }
+              title: { display: true, text: yLabel },
+              stacked: viewMode === 'costCode' && stackBars
             }
           }
         }
       });
+    }
+
+    function buildColorPalette(count = 1) {
+      const colors = [];
+      for (let i = 0; i < count; i++) {
+        const hue = (i * 47) % 360;
+        colors.push(`hsl(${hue} 70% 55% / 0.85)`);
+      }
+      return colors;
     }
 
     async function handleAreaMappingChange(budgetKey, targetKey) {
