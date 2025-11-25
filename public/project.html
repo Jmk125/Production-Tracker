@@ -152,6 +152,7 @@
           <div id="budgetMeta" style="color: var(--text-secondary); font-size: 0.9rem;">Loading budget...</div>
         </div>
         <div id="budgetSummary" style="margin-top: 1rem;">Loading budget...</div>
+        <div id="areaVarianceSummary" style="margin-top: 1.25rem;"></div>
         <div class="chart-controls" style="align-items: center; margin-top: 1.25rem; justify-content: space-between;">
           <div style="color: var(--text-secondary); font-size: 0.9rem;">Show variance by hours or percent for all cost codes</div>
           <div style="display: inline-flex; gap: 0.5rem; align-items: center;">
@@ -1113,6 +1114,7 @@
     function renderAreaSection() {
       renderAreaMappings();
       renderAreaComparison();
+      renderAreaVarianceSummary();
     }
 
     function renderAreaMappings() {
@@ -1200,6 +1202,49 @@
                       <button class="chip" type="button" onclick="saveAreaAdjustment('${row.key}', 'actual')">Save</button>
                     </div>
                   </td>
+                </tr>
+              `).join('')}
+            </tbody>
+          </table>
+        </div>
+      `;
+    }
+
+    function renderAreaVarianceSummary() {
+      const container = document.getElementById('areaVarianceSummary');
+      if (!container) return;
+
+      if (!areaData || !Array.isArray(areaData.comparison) || areaData.comparison.length === 0) {
+        container.innerHTML = '<p style="color: var(--text-secondary);">Upload a budget with area names to see variance by area.</p>';
+        return;
+      }
+
+      const rows = [...areaData.comparison].sort((a, b) => a.area.localeCompare(b.area));
+
+      container.innerHTML = `
+        <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 0.5rem;">
+          <h4 style="margin: 0;">Variance by area</h4>
+          <span style="color: var(--text-secondary); font-size: 0.9rem;">From budget import areas</span>
+        </div>
+        <div style="overflow-x: auto;">
+          <table style="width: 100%; border-collapse: collapse;">
+            <thead>
+              <tr style="border-bottom: 2px solid var(--border-color);">
+                <th style="padding: 0.6rem; text-align: left;">Area</th>
+                <th style="padding: 0.6rem; text-align: right;">Budgeted</th>
+                <th style="padding: 0.6rem; text-align: right;">Spent</th>
+                <th style="padding: 0.6rem; text-align: right;">Variance (hrs)</th>
+                <th style="padding: 0.6rem; text-align: right;">Variance (%)</th>
+              </tr>
+            </thead>
+            <tbody>
+              ${rows.map(row => `
+                <tr style="border-bottom: 1px solid var(--border-color);">
+                  <td style="padding: 0.6rem; font-weight: 600;">${escapeHtml(row.area)}</td>
+                  <td style="padding: 0.6rem; text-align: right;">${formatHours(row.budget_hours)}</td>
+                  <td style="padding: 0.6rem; text-align: right;">${formatHours(row.actual_hours)}</td>
+                  <td style="padding: 0.6rem; text-align: right;">${formatVarianceBadge(row.variance_hours)}</td>
+                  <td style="padding: 0.6rem; text-align: right;">${formatPercentVariance(row.variance_percent)}</td>
                 </tr>
               `).join('')}
             </tbody>
