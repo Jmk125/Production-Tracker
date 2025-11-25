@@ -94,10 +94,11 @@ async function buildBudgetComparison(projectId, latestBudget = null) {
 }
 
 async function buildAreaComparison(projectId, latestBudget = null) {
-  const [latestBudgetUpload, areaConfig, jobTotals] = await Promise.all([
+  const [latestBudgetUpload, areaConfig, jobTotals, jobCostCodes] = await Promise.all([
     latestBudget ? Promise.resolve(latestBudget) : budgetQueries.getLatestByProject(projectId),
     areaQueries.getByProject(projectId),
-    timeEntryQueries.getJobTotals(projectId)
+    timeEntryQueries.getJobTotals(projectId),
+    timeEntryQueries.getJobCostCodeTotals(projectId)
   ]);
 
   const budgetAreasRaw = latestBudgetUpload?.area_hours || {};
@@ -109,6 +110,22 @@ async function buildAreaComparison(projectId, latestBudget = null) {
 
   const actualTotals = jobTotals.totals || {};
   const actualLabels = jobTotals.labels || {};
+
+  const aggregatedCostCodes = {};
+
+  Object.entries(jobCostCodes || {}).forEach(([key, data]) => {
+    const normalized = normalizeJobLabel(key);
+    if (!normalized) return;
+
+    aggregatedCostCodes[normalized] = aggregatedCostCodes[normalized] || { costCodes: {}, total: 0 };
+
+    Object.entries(data.costCodes || {}).forEach(([code, hours]) => {
+      const normalizedCode = code || 'Unspecified';
+      aggregatedCostCodes[normalized].costCodes[normalizedCode] =
+        (aggregatedCostCodes[normalized].costCodes[normalizedCode] || 0) + (Number(hours) || 0);
+      aggregatedCostCodes[normalized].total += Number(hours) || 0;
+    });
+  });
 
   const budgetAggregated = {};
   const labelMap = { ...actualLabels };
@@ -138,6 +155,11 @@ async function buildAreaComparison(projectId, latestBudget = null) {
     const normalized = normalizeJobLabel(key);
     actualAggregated[normalized] = (actualAggregated[normalized] || 0) + (Number(hours) || 0);
     if (!labelMap[normalized]) labelMap[normalized] = key;
+
+    aggregatedCostCodes[normalized] = aggregatedCostCodes[normalized] || { costCodes: {}, total: 0 };
+    aggregatedCostCodes[normalized].costCodes['Adjustment'] =
+      (aggregatedCostCodes[normalized].costCodes['Adjustment'] || 0) + (Number(hours) || 0);
+    aggregatedCostCodes[normalized].total += Number(hours) || 0;
   });
 
   const allKeys = new Set([
@@ -161,6 +183,62 @@ async function buildAreaComparison(projectId, latestBudget = null) {
     };
   }).sort((a, b) => a.area.localeCompare(b.area));
 
+  const costCodeBreakdown = {};
+
+  const buildCostCodeBreakdown = (targetKey, budgetTotal = 0) => {
+    const breakdown = aggregatedCostCodes[targetKey] || { costCodes: {}, total: 0 };
+    const entries = Object.entries(breakdown.costCodes || {});
+    const actualTotal = entries.reduce((sum, [, hours]) => sum + (Number(hours) || 0), 0);
+    const allocationBase = actualTotal > 0 ? actualTotal : 0;
+
+    const costCodeEntries = entries.map(([code, hours]) => {
+      const actualHours = Number(hours) || 0;
+      const budgetHours = budgetTotal > 0 && allocationBase > 0
+        ? (actualHours / allocationBase) * budgetTotal
+        : 0;
+      const varianceHours = actualHours - budgetHours;
+
+      return {
+        cost_code: code,
+        actual_hours: actualHours,
+        budget_hours: budgetHours,
+        variance_hours: varianceHours,
+        variance_percent: budgetHours > 0 ? (varianceHours / budgetHours) * 100 : null
+      };
+    });
+
+    if (budgetTotal > 0 && costCodeEntries.length === 0) {
+      costCodeEntries.push({
+        cost_code: 'Budget',
+        actual_hours: 0,
+        budget_hours: budgetTotal,
+        variance_hours: -budgetTotal,
+        variance_percent: -100
+      });
+    }
+
+    const allocatedBudget = costCodeEntries.reduce((sum, entry) => sum + entry.budget_hours, 0);
+    if (budgetTotal > 0 && allocationBase > 0 && costCodeEntries.length > 0) {
+      const delta = budgetTotal - allocatedBudget;
+      const lastEntry = costCodeEntries[costCodeEntries.length - 1];
+      lastEntry.budget_hours += delta;
+      lastEntry.variance_hours = lastEntry.actual_hours - lastEntry.budget_hours;
+      lastEntry.variance_percent = lastEntry.budget_hours !== 0
+        ? (lastEntry.variance_hours / lastEntry.budget_hours) * 100
+        : null;
+    }
+
+    return {
+      entries: costCodeEntries,
+      totalActual: actualTotal,
+      totalBudget: budgetTotal
+    };
+  };
+
+  comparison.forEach(row => {
+    costCodeBreakdown[row.key] = buildCostCodeBreakdown(row.key, row.budget_hours);
+  });
+
   const actualAreas = Object.keys(actualTotals).map(key => ({
     key,
     label: actualLabels[key] || key,
@@ -172,7 +250,8 @@ async function buildAreaComparison(projectId, latestBudget = null) {
     budgetAreas,
     actualAreas,
     mappings,
-    adjustments
+    adjustments,
+    costCodeBreakdown
   };
 }
 
