@@ -516,6 +516,18 @@ nav a:hover, nav a.active {
   transition: background-color 0.2s, color 0.2s;
 }
 
+.sort-button {
+  background: none;
+  border: none;
+  color: inherit;
+  font-weight: 600;
+  display: inline-flex;
+  align-items: center;
+  gap: 0.25rem;
+  cursor: pointer;
+  padding: 0;
+}
+
 .collapse-toggle:hover {
   background: var(--background);
   color: var(--text-primary);

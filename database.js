@@ -336,6 +336,7 @@ const comparisonQueries = {
 
     projectEntries.forEach(entry => {
       const entryDate = new Date(entry.date);
+      const hours = Number(entry.hours) || 0;
       const monthsDiff = Math.floor((entryDate - firstDate) / (30.44 * 24 * 60 * 60 * 1000)) + 1;
       const calendarMonth = entry.date.substring(0, 7);
 
@@ -372,7 +373,7 @@ const comparisonQueries = {
           total_hours: 0
         };
       }
-      aggregated[key].total_hours += entry.hours;
+      aggregated[key].total_hours += hours;
     });
 
     const buildEmployeeStats = (statMap) => Object.entries(statMap).reduce((acc, [key, value]) => {

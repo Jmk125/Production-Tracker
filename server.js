@@ -343,11 +343,23 @@ app.post('/api/comparison/timeline', async (req, res) => {
     
     const comparisonData = await Promise.all(
       projectIds.map(async (projectId) => {
-        const { entries, employeeStats } = await comparisonQueries.getProjectTimeline(projectId);
+        const { entries, rawEntries, projectStartDate, employeeStats } = await comparisonQueries.getProjectTimeline(projectId);
+        const { comparison: budgetComparison } = await buildBudgetComparison(projectId);
+
+        const totalBudgetHours = budgetComparison.reduce((sum, row) => sum + (Number(row.budget_hours) || 0), 0);
+        const totalActualHours = budgetComparison.reduce((sum, row) => sum + (Number(row.actual_hours) || 0), 0);
+
         return {
           projectId,
           data: entries,
-          employeeStats
+          rawEntries,
+          projectStartDate,
+          employeeStats,
+          budgetSummary: {
+            budgetedHours: totalBudgetHours,
+            actualHours: totalActualHours,
+            varianceHours: totalActualHours - totalBudgetHours
+          }
         };
       })
     );

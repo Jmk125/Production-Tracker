@@ -284,6 +284,7 @@
     let selectedJobs = new Set();
     let budgetData = null;
     let budgetComparison = [];
+    let budgetSort = { column: 'variance_hours', direction: 'desc' };
     let hoursChart = null;
     let payClassChart = null;
     let budgetChart = null;
@@ -856,8 +857,7 @@
       const totalActualHours = budgetComparison.reduce((sum, row) => sum + (row.actual_hours || 0), 0);
       const totalVariance = totalActualHours - totalBudgetHours;
 
-      const varianceRows = [...budgetComparison]
-        .sort((a, b) => Math.abs(b.variance_hours) - Math.abs(a.variance_hours));
+      const varianceRows = sortBudgetRows(budgetComparison);
 
       summaryEl.innerHTML = `
         <div style="display: grid; gap: 1rem;">
@@ -880,11 +880,31 @@
               <table style="width: 100%; border-collapse: collapse;">
                 <thead>
                   <tr style="border-bottom: 2px solid var(--border-color);">
-                    <th style="text-align: left; padding: 0.5rem;">Cost Code</th>
-                    <th style="text-align: right; padding: 0.5rem;">Budget</th>
-                    <th style="text-align: right; padding: 0.5rem;">Spent</th>
-                    <th style="text-align: right; padding: 0.5rem;">Variance</th>
-                    <th style="text-align: right; padding: 0.5rem;">% Variance</th>
+                    <th style="text-align: left; padding: 0.5rem;">
+                      <button class="sort-button" type="button" onclick="changeBudgetSort('cost_code')">
+                        Cost Code ${renderSortIndicator('cost_code')}
+                      </button>
+                    </th>
+                    <th style="text-align: right; padding: 0.5rem;">
+                      <button class="sort-button" type="button" onclick="changeBudgetSort('budget_hours')">
+                        Budget ${renderSortIndicator('budget_hours')}
+                      </button>
+                    </th>
+                    <th style="text-align: right; padding: 0.5rem;">
+                      <button class="sort-button" type="button" onclick="changeBudgetSort('actual_hours')">
+                        Spent ${renderSortIndicator('actual_hours')}
+                      </button>
+                    </th>
+                    <th style="text-align: right; padding: 0.5rem;">
+                      <button class="sort-button" type="button" onclick="changeBudgetSort('variance_hours')">
+                        Variance ${renderSortIndicator('variance_hours')}
+                      </button>
+                    </th>
+                    <th style="text-align: right; padding: 0.5rem;">
+                      <button class="sort-button" type="button" onclick="changeBudgetSort('variance_percent')">
+                        % Variance ${renderSortIndicator('variance_percent')}
+                      </button>
+                    </th>
                   </tr>
                 </thead>
                 <tbody>
@@ -903,6 +923,46 @@
           ` : '<p style="color: var(--text-secondary);">No budget variance to display yet.</p>'}
         </div>
       `;
+    }
+
+    function changeBudgetSort(column) {
+      if (budgetSort.column === column) {
+        budgetSort.direction = budgetSort.direction === 'asc' ? 'desc' : 'asc';
+      } else {
+        budgetSort = { column, direction: column === 'cost_code' ? 'asc' : 'desc' };
+      }
+
+      renderBudgetSummary();
+      renderBudgetCharts();
+    }
+
+    function renderSortIndicator(column) {
+      if (budgetSort.column !== column) return '';
+      return budgetSort.direction === 'asc' ? '▲' : '▼';
+    }
+
+    function sortBudgetRows(rows = []) {
+      const { column, direction } = budgetSort;
+      const multiplier = direction === 'asc' ? 1 : -1;
+
+      const getValue = (row) => {
+        if (column === 'cost_code') return row.cost_code || '';
+        if (column === 'budget_hours') return Number(row.budget_hours) || 0;
+        if (column === 'actual_hours') return Number(row.actual_hours) || 0;
+        if (column === 'variance_percent') return Number.isFinite(row.variance_percent) ? row.variance_percent : -Infinity;
+        return Number(row.variance_hours) || 0;
+      };
+
+      return [...rows].sort((a, b) => {
+        const aVal = getValue(a);
+        const bVal = getValue(b);
+
+        if (typeof aVal === 'string' || typeof bVal === 'string') {
+          return aVal.localeCompare(bVal) * multiplier;
+        }
+
+        return (aVal - bVal) * multiplier;
+      });
     }
 
     function renderBudgetBreakdown() {
@@ -952,7 +1012,7 @@
 
       if (!budgetData || !budgetData.latest || !budgetComparison.length || !varianceCanvas) return;
 
-      const sortedRows = [...budgetComparison].sort((a, b) => Math.abs(b.variance_hours) - Math.abs(a.variance_hours));
+      const sortedRows = sortBudgetRows(budgetComparison);
       const labels = sortedRows.map(row => row.cost_code);
 
       const values = sortedRows.map(row => {
