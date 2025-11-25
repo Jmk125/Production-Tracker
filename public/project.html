@@ -1167,33 +1167,36 @@
 
       container.innerHTML = `
         <div style="overflow-x: auto;">
-          <table style="width: 100%; border-collapse: collapse;">
+          <table class="area-table">
             <thead>
-              <tr style="border-bottom: 2px solid var(--border-color);">
-                <th style="text-align: left; padding: 0.5rem;">Area</th>
-                <th style="text-align: right; padding: 0.5rem;">Budgeted</th>
-                <th style="text-align: right; padding: 0.5rem;">Spent</th>
-                <th style="text-align: right; padding: 0.5rem;">Variance</th>
-                <th style="text-align: right; padding: 0.5rem;">Adjust budget</th>
-                <th style="text-align: right; padding: 0.5rem;">Adjust spent</th>
+              <tr>
+                <th class="area-cell">Area</th>
+                <th class="number-cell">Budgeted</th>
+                <th class="number-cell">Spent</th>
+                <th class="number-cell">Variance</th>
+                <th class="number-cell">Adjust budget</th>
+                <th class="number-cell">Adjust spent</th>
               </tr>
             </thead>
             <tbody>
               ${areaData.comparison.map(row => `
-                <tr style="border-bottom: 1px solid var(--border-color);">
-                  <td style="padding: 0.6rem; font-weight: 600;">${escapeHtml(row.area)}</td>
-                  <td style="padding: 0.6rem; text-align: right;">${formatHours(row.budget_hours)}</td>
-                  <td style="padding: 0.6rem; text-align: right;">${formatHours(row.actual_hours)}</td>
-                  <td style="padding: 0.6rem; text-align: right;">${formatVarianceBadge(row.variance_hours)}<div style="color: var(--text-secondary); font-size: 0.8rem;">${formatPercentVariance(row.variance_percent)}</div></td>
-                  <td style="padding: 0.6rem; text-align: right; min-width: 160px;">
-                    <div style="display: flex; gap: 0.35rem; justify-content: flex-end; align-items: center;">
-                      <input type="number" step="0.1" data-adjust-input="budget-${row.key}" value="${areaData.adjustments?.budget?.[row.key] ?? ''}" style="width: 90px; padding: 0.35rem;">
+                <tr>
+                  <td class="area-cell">${escapeHtml(row.area)}</td>
+                  <td class="number-cell">${formatHours(row.budget_hours)}</td>
+                  <td class="number-cell">${formatHours(row.actual_hours)}</td>
+                  <td class="variance-cell">
+                    <div class="variance-value">${formatVarianceBadge(row.variance_hours)}</div>
+                    <div class="variance-percent">${formatPercentVariance(row.variance_percent)}</div>
+                  </td>
+                  <td class="adjust-cell">
+                    <div class="adjust-inputs">
+                      <input type="number" step="0.1" data-adjust-input="budget-${row.key}" value="${areaData.adjustments?.budget?.[row.key] ?? ''}" aria-label="Adjust budget hours for ${escapeHtml(row.area)}">
                       <button class="chip" type="button" onclick="saveAreaAdjustment('${row.key}', 'budget')">Save</button>
                     </div>
                   </td>
-                  <td style="padding: 0.6rem; text-align: right; min-width: 160px;">
-                    <div style="display: flex; gap: 0.35rem; justify-content: flex-end; align-items: center;">
-                      <input type="number" step="0.1" data-adjust-input="actual-${row.key}" value="${areaData.adjustments?.actual?.[row.key] ?? ''}" style="width: 90px; padding: 0.35rem;">
+                  <td class="adjust-cell">
+                    <div class="adjust-inputs">
+                      <input type="number" step="0.1" data-adjust-input="actual-${row.key}" value="${areaData.adjustments?.actual?.[row.key] ?? ''}" aria-label="Adjust spent hours for ${escapeHtml(row.area)}">
                       <button class="chip" type="button" onclick="saveAreaAdjustment('${row.key}', 'actual')">Save</button>
                     </div>
                   </td>
