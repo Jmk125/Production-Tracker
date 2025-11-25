@@ -122,6 +122,17 @@
           </div>
         </div>
 
+        <div class="card" id="costCodeVarianceCard" style="margin-bottom: 1.5rem; display: none;">
+          <div class="card-header" style="align-items: flex-start;">
+            <div>
+              <h3 class="card-title">Cost Code Variance</h3>
+              <div style="color: var(--text-secondary); font-size: 0.9rem;">Spent vs. budgeted hours by cost code</div>
+            </div>
+            <div style="color: var(--text-secondary); font-size: 0.9rem;">Respects cost code filters</div>
+          </div>
+          <div id="costCodeVarianceTable"></div>
+        </div>
+
         <div id="metricsComparison" style="display: none;">
           <div class="card">
             <h3 class="card-title" style="margin-bottom: 1rem;">Comparative Metrics</h3>
@@ -239,6 +250,10 @@
       comparisonData.forEach(project => {
         project.data.forEach(entry => {
           uniqueCodes.add(normalizeCostCodeLabel(entry.cost_code));
+        });
+
+        (project.budgetComparison || []).forEach(row => {
+          uniqueCodes.add(normalizeCostCodeLabel(row.cost_code));
         });
       });
 
@@ -376,6 +391,7 @@
       const filteredData = getFilteredComparisonData();
       updateComparisonChart(filteredData);
       updateEmployeeChart(filteredData);
+      renderCostCodeVarianceTable(filteredData);
     }
 
     function updateComparisonChart(data = comparisonData) {
@@ -505,6 +521,7 @@
           ...project,
           data: [],
           rawEntries: project.rawEntries || [],
+          budgetComparison: [],
           employeeStats: buildEmployeeStatsFromEntries([], project.projectStartDate)
         }));
       }
@@ -512,11 +529,13 @@
       return comparisonData.map(project => {
         const filteredEntries = filterBySelectedCostCodes(project.data);
         const filteredRawEntries = filterRawEntriesByCostCode(project.rawEntries || []);
+        const filteredBudget = filterBudgetRows(project.budgetComparison || []);
 
         return {
           ...project,
           data: filteredEntries,
           rawEntries: filteredRawEntries,
+          budgetComparison: filteredBudget,
           employeeStats: buildEmployeeStatsFromEntries(filteredRawEntries, project.projectStartDate)
         };
       });
@@ -530,6 +549,11 @@
     function filterRawEntriesByCostCode(entries) {
       if (!selectedComparisonCostCodes.size) return [];
       return entries.filter(entry => selectedComparisonCostCodes.has(normalizeCostCodeLabel(entry.cost_code)));
+    }
+
+    function filterBudgetRows(rows) {
+      if (!selectedComparisonCostCodes.size) return [];
+      return rows.filter(row => selectedComparisonCostCodes.has(normalizeCostCodeLabel(row.cost_code)));
     }
 
     function buildEmployeeStatsFromEntries(entries, projectStartDate) {
@@ -824,6 +848,87 @@
       };
     }
 
+    function renderCostCodeVarianceTable(data = comparisonData) {
+      const container = document.getElementById('costCodeVarianceTable');
+      const card = document.getElementById('costCodeVarianceCard');
+      if (!container || !card) return;
+
+      if (!data.length) {
+        card.style.display = 'none';
+        return;
+      }
+
+      const projectHeaders = data.map(project => ({
+        id: project.projectId,
+        name: project.data[0]?.project_name || getProjectName(project.projectId)
+      }));
+
+      const costCodes = new Set();
+      data.forEach(project => {
+        (project.budgetComparison || []).forEach(row => {
+          costCodes.add(normalizeCostCodeLabel(row.cost_code));
+        });
+      });
+
+      card.style.display = 'block';
+
+      if (!selectedComparisonCostCodes.size) {
+        container.innerHTML = '<p style="color: var(--text-secondary);">Select cost codes to see variance.</p>';
+        return;
+      }
+
+      if (!costCodes.size) {
+        container.innerHTML = '<p style="color: var(--text-secondary);">No variance data for the selected cost codes yet.</p>';
+        return;
+      }
+
+      const sortedCodes = Array.from(costCodes).sort();
+
+      const tableRows = sortedCodes.map(code => {
+        const projectCells = data.map(project => {
+          const match = (project.budgetComparison || []).find(row => normalizeCostCodeLabel(row.cost_code) === code);
+
+          if (!match) {
+            return '<td style="padding: 0.6rem; text-align: right; min-width: 180px;">—</td>';
+          }
+
+          return `
+            <td style="padding: 0.6rem; min-width: 180px;">
+              <div style="display: grid; gap: 0.25rem;">
+                <div style="font-weight: 600;">Budget: ${formatHours(match.budget_hours)}</div>
+                <div>Spent: ${formatHours(match.actual_hours)}</div>
+                <div style="margin-top: 0.25rem;">${formatVarianceBadge(match.variance_hours)}</div>
+                <div style="color: var(--text-secondary); font-size: 0.85rem;">${formatPercentVariance(match.variance_percent)}</div>
+              </div>
+            </td>
+          `;
+        }).join('');
+
+        return `
+          <tr style="border-bottom: 1px solid var(--border-color);">
+            <td style="padding: 0.6rem; font-weight: 600;">${escapeHtml(code)}</td>
+            ${projectCells}
+          </tr>
+        `;
+      }).join('');
+
+      container.innerHTML = `
+        <div style="overflow-x: auto;">
+          <table style="width: 100%; border-collapse: collapse;">
+            <thead>
+              <tr style="border-bottom: 2px solid var(--border-color);">
+                <th style="padding: 0.6rem; text-align: left;">Cost Code</th>
+                ${projectHeaders.map(project => `<th style="padding: 0.6rem; text-align: left; min-width: 180px;">${escapeHtml(project.name)}</th>`).join('')}
+              </tr>
+            </thead>
+            <tbody>
+              ${tableRows}
+            </tbody>
+          </table>
+        </div>
+      `;
+    }
+
     function renderMetrics() {
       const metricsGrid = document.getElementById('metricsGrid');
       
@@ -899,6 +1004,11 @@
       `).join('');
     }
 
+    function getProjectName(projectId) {
+      const match = allProjects.find(p => Number(p.id) === Number(projectId));
+      return match ? match.name : `Project ${projectId}`;
+    }
+
     function formatDate(dateStr) {
       if (!dateStr) return '';
       const date = new Date(dateStr + 'T00:00:00');
@@ -909,6 +1019,24 @@
       const [year, month] = monthStr.split('-');
       const date = new Date(year, month - 1);
       return date.toLocaleDateString('en-US', { month: 'short', year: 'numeric' });
+    }
+
+    function formatHours(value) {
+      if (value === null || value === undefined || Number.isNaN(value)) return '—';
+      return Number(value || 0).toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 });
+    }
+
+    function formatVarianceBadge(value) {
+      const numeric = Number(value || 0);
+      const sign = numeric > 0 ? '+' : '';
+      const color = numeric > 0 ? '#ef4444' : numeric < 0 ? '#22c55e' : '#0f172a';
+      return `<span style="font-weight: 700; color: ${color};">${sign}${numeric.toFixed(2)}</span>`;
+    }
+
+    function formatPercentVariance(value) {
+      if (value === null || value === undefined || Number.isNaN(value)) return '—';
+      const sign = value > 0 ? '+' : '';
+      return `${sign}${Number(value).toFixed(1)}%`;
     }
 
     function normalizeCostCodeLabel(code) {
