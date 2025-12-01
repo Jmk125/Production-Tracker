@@ -202,14 +202,14 @@
         <div class="card-header">
           <div>
             <h3 class="card-title" style="margin-bottom: 0.25rem;">Upload Budget Spreadsheet</h3>
-            <p style="color: var(--text-secondary); font-size: 0.9rem;">We'll read cost codes from column B and labor hours from column I, then total by cost code.</p>
+            <p style="color: var(--text-secondary); font-size: 0.9rem;">We'll read cost codes from column B, cost code names from column C, and labor hours from column I.</p>
           </div>
         </div>
 
         <div id="budgetUploadArea" class="upload-area">
           <input type="file" id="budgetFileInput" accept=".xlsx,.xls" style="display: none;" onchange="handleBudgetFileSelect(event)">
           <p style="font-size: 1.125rem; margin-bottom: 0.5rem;">📊 Drop Excel budget here or click to browse</p>
-          <p style="color: var(--text-secondary); font-size: 0.875rem;">Excel files with cost codes in column D and hours in column K.</p>
+          <p style="color: var(--text-secondary); font-size: 0.875rem;">Excel files with cost codes in column B, names in column C, and hours in column I.</p>
         </div>
 
         <div id="budgetUploadProgress" style="display: none; margin-top: 1rem;">
@@ -308,6 +308,7 @@
     let selectedJobs = new Set();
     let budgetData = null;
     let budgetComparison = [];
+    let costCodeNames = {};
     let areaData = { comparison: [], budgetAreas: [], actualAreas: [], mappings: {}, adjustments: { budget: {}, actual: {} } };
     let budgetSort = { column: 'variance_hours', direction: 'desc' };
     let areaSort = { column: 'variance_hours', direction: 'desc' };
@@ -385,7 +386,12 @@
         const response = await fetch(`/api/projects/${projectId}/budget`);
         budgetData = await response.json();
         budgetComparison = budgetData.comparison || [];
+        costCodeNames = budgetData.costCodeNames || budgetData.latest?.cost_code_names || {};
         areaData = budgetData.areaComparison || areaData;
+
+        mergeCostCodeNamesFromRows(budgetComparison);
+
+        renderCostCodeList();
 
         renderBudgetSummary();
         renderBudgetUploads(budgetData.uploads || []);
@@ -396,6 +402,21 @@
         console.error('Error loading budget data:', error);
         document.getElementById('budgetSummary').textContent = 'Unable to load budget data.';
       }
+    }
+
+    function mergeCostCodeNamesFromRows(rows = []) {
+      const updated = { ...(costCodeNames || {}) };
+
+      rows.forEach(row => {
+        const normalized = normalizeCostCodeClient(row.cost_code);
+        const name = row.cost_code_name?.toString().trim();
+        if (!normalized || !name) return;
+        if (!updated[normalized]) {
+          updated[normalized] = name;
+        }
+      });
+
+      costCodeNames = updated;
     }
 
     async function loadAreaData() {
@@ -471,7 +492,7 @@
       costCodeList.forEach(code => {
         const label = document.createElement('label');
         label.className = 'checkbox chip';
-        label.title = `Toggle ${code}`;
+        label.title = formatCostCodeLabel(code);
 
         const input = document.createElement('input');
         input.type = 'checkbox';
@@ -480,7 +501,7 @@
         input.addEventListener('change', handleCostCodeToggle);
 
         label.appendChild(input);
-        label.appendChild(document.createTextNode(` ${code}`));
+        label.appendChild(document.createTextNode(` ${formatCostCodeLabel(code)}`));
 
         list.appendChild(label);
       });
@@ -927,6 +948,7 @@
                         Cost Code ${renderSortIndicator('cost_code')}
                       </button>
                     </th>
+                    <th style="text-align: left; padding: 0.5rem;">Name</th>
                     <th style="text-align: right; padding: 0.5rem;">
                       <button class="sort-button" type="button" onclick="changeBudgetSort('budget_hours')">
                         Budget ${renderSortIndicator('budget_hours')}
@@ -953,6 +975,7 @@
                   ${varianceRows.map(row => `
                     <tr style="border-bottom: 1px solid var(--border-color);">
                       <td style="padding: 0.5rem; font-weight: 600;">${escapeHtml(row.cost_code)}</td>
+                      <td style="padding: 0.5rem; color: var(--text-secondary);">${escapeHtml(row.cost_code_name || getCostCodeName(row.cost_code) || '—')}</td>
                       <td style="padding: 0.5rem; text-align: right;">${formatHours(row.budget_hours)}</td>
                       <td style="padding: 0.5rem; text-align: right;">${formatHours(row.actual_hours)}</td>
                       <td style="padding: 0.5rem; text-align: right;">${formatVarianceBadge(row.variance_hours)}</td>
@@ -1020,20 +1043,22 @@
 
       container.innerHTML = `
         <div style="overflow-x: auto;">
-          <table style="width: 100%; border-collapse: collapse;">
-            <thead>
-              <tr style="border-bottom: 2px solid var(--border-color);">
-                <th style="text-align: left; padding: 0.6rem;">Cost Code</th>
-                <th style="text-align: right; padding: 0.6rem;">Budget Hours</th>
-                <th style="text-align: right; padding: 0.6rem;">Hours Spent</th>
-                <th style="text-align: right; padding: 0.6rem;">Variance (hrs)</th>
-                <th style="text-align: right; padding: 0.6rem;">Variance (%)</th>
+              <table style="width: 100%; border-collapse: collapse;">
+                <thead>
+                  <tr style="border-bottom: 2px solid var(--border-color);">
+                    <th style="text-align: left; padding: 0.6rem;">Cost Code</th>
+                    <th style="text-align: left; padding: 0.6rem;">Name</th>
+                    <th style="text-align: right; padding: 0.6rem;">Budget Hours</th>
+                    <th style="text-align: right; padding: 0.6rem;">Hours Spent</th>
+                    <th style="text-align: right; padding: 0.6rem;">Variance (hrs)</th>
+                    <th style="text-align: right; padding: 0.6rem;">Variance (%)</th>
               </tr>
             </thead>
             <tbody>
               ${rows.map(row => `
                 <tr style="border-bottom: 1px solid var(--border-color);">
                   <td style="padding: 0.6rem; font-weight: 600;">${escapeHtml(row.cost_code)}</td>
+                  <td style="padding: 0.6rem; color: var(--text-secondary);">${escapeHtml(row.cost_code_name || getCostCodeName(row.cost_code) || '—')}</td>
                   <td style="padding: 0.6rem; text-align: right;">${formatHours(row.budget_hours)}</td>
                   <td style="padding: 0.6rem; text-align: right;">${formatHours(row.actual_hours)}</td>
                   <td style="padding: 0.6rem; text-align: right;">${formatVarianceBadge(row.variance_hours)}</td>
@@ -1094,11 +1119,12 @@
               callbacks: {
                 label: (context) => {
                   const row = sortedRows[context.dataIndex];
+                  const costCodeLabel = formatCostCodeLabel(row.cost_code);
                   if (chartMode === 'percent') {
                     const percent = Number.isFinite(row.variance_percent) ? row.variance_percent.toFixed(1) + '%' : 'N/A';
-                    return `${row.cost_code}: ${percent}`;
+                    return `${costCodeLabel}: ${percent}`;
                   }
-                  return `${row.cost_code}: ${formatHours(row.variance_hours)} hrs`;
+                  return `${costCodeLabel}: ${formatHours(row.variance_hours)} hrs`;
                 }
               }
             }
@@ -1384,6 +1410,7 @@
       const rowsHtml = breakdown.entries.map(entry => `
         <tr>
           <td class="area-cell">${escapeHtml(entry.cost_code)}</td>
+          <td class="area-cell" style="color: var(--text-secondary);">${escapeHtml(getCostCodeName(entry.cost_code) || '—')}</td>
           <td class="number-cell">${formatHours(entry.budget_hours)}</td>
           <td class="number-cell">${formatHours(entry.actual_hours)}</td>
           <td class="number-cell">${formatVarianceBadge(entry.variance_hours)}</td>
@@ -1398,6 +1425,7 @@
             <thead>
               <tr>
                 <th style="text-align: left;">Cost code</th>
+                <th style="text-align: left;">Name</th>
                 <th class="number-cell">Budgeted</th>
                 <th class="number-cell">Spent</th>
                 <th class="number-cell">Variance</th>
@@ -1614,6 +1642,18 @@
         chartData = aggregateByCategory(baseData, 'employee_name');
       }
 
+      const tooltipCallbacks = {};
+
+      if (viewType === 'costCode') {
+        tooltipCallbacks.label = (context) => {
+          const label = context.dataset.label || '';
+          const hours = context.parsed.y;
+          const displayLabel = formatCostCodeLabel(label);
+          const formattedHours = Number.isFinite(hours) ? formatHours(hours) : '0.00';
+          return `${displayLabel}: ${formattedHours} hrs`;
+        };
+      }
+
       hoursChart = new Chart(ctx, {
         type: 'bar',
         data: chartData,
@@ -1626,7 +1666,8 @@
             },
             tooltip: {
               mode: 'index',
-              intersect: false
+              intersect: false,
+              callbacks: tooltipCallbacks
             }
           },
           scales: {
@@ -2015,12 +2056,12 @@
       resultDiv.innerHTML = '';
 
       try {
-        const { costCodeHours, areaHours } = await parseBudgetFile(file);
+        const { costCodeHours, areaHours, costCodeNames: parsedCostCodeNames } = await parseBudgetFile(file);
 
         const response = await fetch(`/api/projects/${projectId}/budget`, {
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({ filename: file.name, costCodeHours, areaHours })
+          body: JSON.stringify({ filename: file.name, costCodeHours, areaHours, costCodeNames: parsedCostCodeNames })
         });
 
         const result = await response.json();
@@ -2029,6 +2070,9 @@
         if (response.ok) {
           budgetData = result;
           budgetComparison = result.comparison || [];
+          costCodeNames = result.costCodeNames || result.latest?.cost_code_names || {};
+          mergeCostCodeNamesFromRows(budgetComparison);
+          renderCostCodeList();
           renderBudgetSummary();
           renderBudgetUploads(result.uploads || []);
           renderBudgetBreakdown();
@@ -2060,7 +2104,7 @@
       }
     }
 
-    // Budget parser: reads cost codes from column B, hours from column I, and tracks areas based on job numbers in column B + area names in column C
+    // Budget parser: reads cost codes from column B, names from column C, hours from column I, and tracks areas based on job numbers in column B + area names in column C
     async function parseBudgetFile(file) {
       if (typeof XLSX === 'undefined') {
         throw new Error('Spreadsheet parser not available.');
@@ -2080,11 +2124,13 @@
 
       // Column B is index 1 (0-based), Column I is index 8
       const costCodeIndex = 1; // Column B
+      const costCodeNameIndex = 2; // Column C contains cost code names next to the code
       const hoursIndex = 8; // Column I
       const areaNameIndex = 2; // Column C contains building/area names when paired with a job number in column B
 
       const totals = {};
       const areaTotals = {};
+      const costCodeNames = {};
       let rowsProcessed = 0;
       let currentArea = null;
       let mainJobPrefix = null;
@@ -2101,6 +2147,7 @@
 
         const rawCode = row[costCodeIndex];
         const rawHours = row[hoursIndex];
+        const rawCostCodeName = row[costCodeNameIndex];
 
         // Capture the overall job prefix (first 4 digits) when we see a "Job" label row
         if (typeof rawCode === 'string' && rawCode.trim().toLowerCase() === 'job') {
@@ -2145,6 +2192,10 @@
         if (!normalizedCode || !Number.isFinite(hours)) continue;
 
         totals[normalizedCode] = (totals[normalizedCode] || 0) + hours;
+        const name = rawCostCodeName?.toString().trim();
+        if (name && !costCodeNames[normalizedCode]) {
+          costCodeNames[normalizedCode] = name;
+        }
 
         if (currentArea) {
           areaTotals[currentArea] = (areaTotals[currentArea] || 0) + hours;
@@ -2160,7 +2211,7 @@
       console.log(
         `Successfully parsed ${Object.keys(totals).length} unique cost codes from ${rowsProcessed} rows in sheet "${sheetName}"`
       );
-      return { costCodeHours: totals, areaHours: areaTotals };
+      return { costCodeHours: totals, areaHours: areaTotals, costCodeNames };
     }
 
     function switchTab(evt, tabName) {
@@ -2185,6 +2236,18 @@
       const [mainPart] = code.toString().split('.');
       const numeric = mainPart.replace(/\D/g, '').trim();
       return numeric || null;
+    }
+
+    function getCostCodeName(code) {
+      const normalized = normalizeCostCodeClient(code);
+      if (!normalized) return null;
+      return costCodeNames?.[normalized] || null;
+    }
+
+    function formatCostCodeLabel(code) {
+      if (!code && code !== 0) return 'Unknown';
+      const name = getCostCodeName(code);
+      return name ? `${code} — ${name}` : code.toString();
     }
 
     function formatDate(dateStr) {
