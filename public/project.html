@@ -161,6 +161,9 @@
               <option value="hours">Variance (hours)</option>
               <option value="percent">Variance (%)</option>
             </select>
+            <label style="display: inline-flex; align-items: center; gap: 0.35rem; font-size: 0.9rem; color: var(--text-secondary);">
+              <input type="checkbox" id="budgetApplyFiltersToggle" onchange="renderBudgetCharts()"> Apply monthly hours filters
+            </label>
           </div>
         </div>
         <div class="chart-container" style="min-height: 420px;">
@@ -310,6 +313,7 @@
     let budgetComparison = [];
     let costCodeNames = {};
     let areaData = { comparison: [], budgetAreas: [], actualAreas: [], mappings: {}, adjustments: { budget: {}, actual: {} } };
+    let areaBreakdownView = {};
     let budgetSort = { column: 'variance_hours', direction: 'desc' };
     let areaSort = { column: 'variance_hours', direction: 'desc' };
     let hoursChart = null;
@@ -1071,15 +1075,54 @@
       `;
     }
 
+    function buildBudgetChartRows(applyFilters = false) {
+      if (!budgetData || !budgetData.latest) return [];
+
+      if (!applyFilters) return budgetComparison;
+
+      const filteredEntries = filterBySelectedJobs(filterBySelectedCostCodes(timeEntries));
+      const actualTotals = {};
+
+      filteredEntries.forEach(entry => {
+        const code = normalizeCostCodeClient(entry.cost_code) || 'Unknown';
+        actualTotals[code] = (actualTotals[code] || 0) + (Number(entry.hours) || 0);
+      });
+
+      const budgetHours = budgetData.latest.cost_code_hours || {};
+      const allCodes = new Set([
+        ...Object.keys(budgetHours),
+        ...Object.keys(actualTotals)
+      ]);
+
+      return Array.from(allCodes).map(code => {
+        const budget = Number(budgetHours[code]) || 0;
+        const actual = Number(actualTotals[code]) || 0;
+        const variance = actual - budget;
+        const variancePercent = budget > 0 ? (variance / budget) * 100 : null;
+
+        return {
+          cost_code: code,
+          cost_code_name: getCostCodeName(code),
+          budget_hours: budget,
+          actual_hours: actual,
+          variance_hours: variance,
+          variance_percent: variancePercent
+        };
+      });
+    }
+
     function renderBudgetCharts() {
       const varianceCanvas = document.getElementById('budgetVarianceChart');
       const chartMode = document.getElementById('budgetChartMode')?.value || 'hours';
+      const applyFilters = document.getElementById('budgetApplyFiltersToggle')?.checked;
 
       if (budgetChart) budgetChart.destroy();
 
-      if (!budgetData || !budgetData.latest || !budgetComparison.length || !varianceCanvas) return;
+      const displayRows = buildBudgetChartRows(applyFilters);
 
-      const sortedRows = sortBudgetRows(budgetComparison);
+      if (!budgetData || !budgetData.latest || !displayRows.length || !varianceCanvas) return;
+
+      const sortedRows = sortBudgetRows(displayRows);
       const labels = sortedRows.map(row => row.cost_code);
 
       const values = sortedRows.map(row => {
@@ -1244,11 +1287,47 @@
       `;
     }
 
+    function buildAreaVarianceData(applyFilters = false) {
+      const rows = Array.isArray(areaData?.comparison) ? [...areaData.comparison] : [];
+      const breakdownSource = areaData?.costCodeBreakdown || {};
+
+      if (!applyFilters) {
+        return { rows, breakdownMap: breakdownSource };
+      }
+
+      const filteredRows = [];
+      const filteredBreakdown = {};
+
+      rows.forEach(row => {
+        if (!selectedJobs.has(normalizeJobLabel(row.key))) return;
+
+        const sourceBreakdown = breakdownSource?.[row.key]?.entries || [];
+        const entries = sourceBreakdown.filter(entry => selectedCostCodes.has(normalizeCostCodeLabel(entry.cost_code)));
+
+        const actualHours = entries.reduce((sum, entry) => sum + (Number(entry.actual_hours) || 0), 0);
+        const budgetHours = entries.reduce((sum, entry) => sum + (Number(entry.budget_hours) || 0), 0);
+        const varianceHours = actualHours - budgetHours;
+        const variancePercent = budgetHours > 0 ? (varianceHours / budgetHours) * 100 : null;
+
+        filteredBreakdown[row.key] = { entries, totalActual: actualHours, totalBudget: budgetHours };
+        filteredRows.push({
+          ...row,
+          actual_hours: actualHours,
+          budget_hours: budgetHours,
+          variance_hours: varianceHours,
+          variance_percent: variancePercent
+        });
+      });
+
+      return { rows: filteredRows, breakdownMap: filteredBreakdown };
+    }
+
     function renderAreaVarianceSummary() {
       const container = document.getElementById('areaVarianceSummary');
       const currentMode = document.getElementById('areaVarianceChartMode')?.value || 'hours';
       const viewMode = document.getElementById('areaVarianceViewMode')?.value || 'area';
       const stackBars = document.getElementById('areaVarianceStackToggle')?.checked ?? true;
+      const applyFilters = document.getElementById('areaVarianceApplyFiltersToggle')?.checked;
       if (!container) return;
 
       if (!areaData || !Array.isArray(areaData.comparison) || areaData.comparison.length === 0) {
@@ -1260,7 +1339,19 @@
         return;
       }
 
-      const rows = sortAreaRows(areaData.comparison);
+      const { rows, breakdownMap } = buildAreaVarianceData(applyFilters);
+      areaBreakdownView = breakdownMap;
+
+      if (!rows.length) {
+        container.innerHTML = '<p style="color: var(--text-secondary);">No matching areas for the current filters.</p>';
+        if (areaVarianceChart) {
+          areaVarianceChart.destroy();
+          areaVarianceChart = null;
+        }
+        return;
+      }
+
+      const sortedRows = sortAreaRows(rows);
 
       container.innerHTML = `
         <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 0.5rem; gap: 1rem; flex-wrap: wrap;">
@@ -1281,6 +1372,9 @@
             </select>
             <label style="display: inline-flex; align-items: center; gap: 0.35rem; font-size: 0.9rem; color: var(--text-secondary);">
               <input type="checkbox" id="areaVarianceStackToggle" ${stackBars ? 'checked' : ''} onchange="renderAreaVarianceSummary()"> Stack bars
+            </label>
+            <label style="display: inline-flex; align-items: center; gap: 0.35rem; font-size: 0.9rem; color: var(--text-secondary);">
+              <input type="checkbox" id="areaVarianceApplyFiltersToggle" onchange="renderAreaVarianceSummary()"> Apply monthly hours filters
             </label>
           </div>
         </div>
@@ -1316,8 +1410,8 @@
               </tr>
             </thead>
             <tbody>
-              ${rows.map(row => {
-                const breakdown = areaData.costCodeBreakdown?.[row.key]?.entries || [];
+              ${sortedRows.map(row => {
+                const breakdown = breakdownMap?.[row.key]?.entries || [];
                 const hasBreakdown = breakdown.length > 0;
                 return `
                   <tr style="border-bottom: 1px solid var(--border-color);">
@@ -1347,7 +1441,7 @@
         </div>
       `;
 
-      renderAreaVarianceChart(rows, currentMode, viewMode, stackBars);
+      renderAreaVarianceChart(sortedRows, currentMode, viewMode, stackBars, breakdownMap);
     }
 
     function changeAreaSort(column) {
@@ -1402,7 +1496,8 @@
     }
 
     function renderCostCodeBreakdown(row) {
-      const breakdown = areaData.costCodeBreakdown?.[row.key];
+      const breakdownSource = areaBreakdownView || areaData.costCodeBreakdown || {};
+      const breakdown = breakdownSource?.[row.key];
       if (!breakdown || !Array.isArray(breakdown.entries) || breakdown.entries.length === 0) {
         return '<div class="empty-breakdown">No cost code detail for this area yet.</div>';
       }
@@ -1440,7 +1535,7 @@
       `;
     }
 
-    function renderAreaVarianceChart(rows = [], mode = 'hours', viewMode = 'area', stackBars = true) {
+    function renderAreaVarianceChart(rows = [], mode = 'hours', viewMode = 'area', stackBars = true, breakdownMap = {}) {
       const canvas = document.getElementById('areaVarianceChart');
 
       if (areaVarianceChart) {
@@ -1455,8 +1550,6 @@
       const labels = rows.map(row => row.area);
       const yLabel = mode === 'percent' ? 'Percent' : 'Hours';
       const dataLabel = mode === 'percent' ? 'Variance (%)' : 'Variance (hrs)';
-
-      const breakdownMap = areaData.costCodeBreakdown || {};
 
       const costCodes = viewMode === 'costCode'
         ? Array.from(new Set(rows.flatMap(row => (breakdownMap[row.key]?.entries || []).map(entry => entry.cost_code)))).sort()
@@ -1516,7 +1609,7 @@
           responsive: true,
           maintainAspectRatio: false,
           plugins: {
-            legend: { display: viewMode === 'costCode' },
+            legend: { display: false },
             tooltip: {
               callbacks: {
                 label: (context) => {
