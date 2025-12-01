@@ -671,10 +671,32 @@
       }
     }
 
+    function getSelectedCostCodeClients() {
+      return new Set(
+        Array.from(selectedCostCodes)
+          .map(code => normalizeCostCodeClient(code))
+          .filter(Boolean)
+      );
+    }
+
+    function isCostCodeSelected(code) {
+      if (!selectedCostCodes.size) return false;
+
+      const labelCode = normalizeCostCodeLabel(code);
+      const clientCode = normalizeCostCodeClient(code);
+      const selectedClients = getSelectedCostCodeClients();
+
+      return (
+        selectedCostCodes.has(labelCode)
+        || (clientCode && selectedCostCodes.has(clientCode))
+        || (clientCode && selectedClients.has(clientCode))
+      );
+    }
+
     function filterBySelectedCostCodes(data) {
       if (!selectedCostCodes.size) return [];
 
-      return data.filter(entry => selectedCostCodes.has(normalizeCostCodeLabel(entry.cost_code)));
+      return data.filter(entry => isCostCodeSelected(entry.cost_code));
     }
 
     function filterBySelectedJobs(data) {
@@ -1080,6 +1102,7 @@
 
       if (!applyFilters) return budgetComparison;
 
+      const selectedBudgetClients = getSelectedCostCodeClients();
       const filteredEntries = filterBySelectedJobs(filterBySelectedCostCodes(timeEntries));
       const actualTotals = {};
 
@@ -1090,7 +1113,10 @@
 
       const budgetHours = budgetData.latest.cost_code_hours || {};
       const selectedBudgetCodes = new Set(
-        Object.keys(budgetHours).filter(code => selectedCostCodes.has(normalizeCostCodeClient(code)))
+        Object.keys(budgetHours).filter(code => {
+          const normalized = normalizeCostCodeClient(code);
+          return normalized && selectedBudgetClients.has(normalized);
+        })
       );
 
       const allCodes = new Set([
@@ -1313,7 +1339,7 @@
         if (!matchesJobSelection) return;
 
         const sourceBreakdown = breakdownSource?.[row.key]?.entries || [];
-        const entries = sourceBreakdown.filter(entry => selectedCostCodes.has(normalizeCostCodeLabel(entry.cost_code)));
+        const entries = sourceBreakdown.filter(entry => isCostCodeSelected(entry.cost_code));
 
         const actualHours = entries.reduce((sum, entry) => sum + (Number(entry.actual_hours) || 0), 0);
         const budgetHours = entries.reduce((sum, entry) => sum + (Number(entry.budget_hours) || 0), 0);
