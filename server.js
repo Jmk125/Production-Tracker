@@ -62,6 +62,26 @@ function alignBudgetCostCodes(budgetHours = {}, actualTotals = {}) {
   return aligned;
 }
 
+function alignCostCodeNames(budgetNames = {}, actualTotals = {}) {
+  const actualCodes = Object.keys(actualTotals || {});
+  const aligned = {};
+
+  Object.entries(budgetNames || {}).forEach(([budgetCode, name]) => {
+    if (!budgetCode || !name) return;
+
+    const matchingActual = actualCodes
+      .filter(code => budgetCode.startsWith(code))
+      .sort((a, b) => b.length - a.length)[0];
+
+    const targetCode = matchingActual || budgetCode;
+    if (!aligned[targetCode]) {
+      aligned[targetCode] = name;
+    }
+  });
+
+  return aligned;
+}
+
 async function buildBudgetComparison(projectId, latestBudget = null) {
   const [budgetUploads, actualTotals] = await Promise.all([
     budgetQueries.getByProject(projectId),
@@ -69,7 +89,10 @@ async function buildBudgetComparison(projectId, latestBudget = null) {
   ]);
 
   const budgetHours = latestBudget ? latestBudget.cost_code_hours : (budgetUploads[0]?.cost_code_hours || {});
+  const budgetNames = latestBudget ? (latestBudget.cost_code_names || {}) : (budgetUploads[0]?.cost_code_names || {});
+
   const alignedBudget = alignBudgetCostCodes(budgetHours, actualTotals);
+  const alignedCostCodeNames = alignCostCodeNames(budgetNames, actualTotals);
   const allCodes = new Set([
     ...Object.keys(alignedBudget || {}),
     ...Object.keys(actualTotals || {})
@@ -83,6 +106,7 @@ async function buildBudgetComparison(projectId, latestBudget = null) {
 
     return {
       cost_code: code,
+      cost_code_name: alignedCostCodeNames?.[code] || null,
       budget_hours: budget,
       actual_hours: actual,
       variance_hours: variance,
@@ -90,7 +114,7 @@ async function buildBudgetComparison(projectId, latestBudget = null) {
     };
   }).sort((a, b) => a.cost_code.localeCompare(b.cost_code));
 
-  return { comparison, latestBudget: budgetUploads[0] || null, budgetUploads };
+  return { comparison, latestBudget: budgetUploads[0] || null, budgetUploads, costCodeNames: alignedCostCodeNames };
 }
 
 async function buildAreaComparison(projectId, latestBudget = null) {
@@ -402,7 +426,7 @@ app.post('/api/projects/:id/upload', upload.single('payroll'), async (req, res) 
 app.post('/api/projects/:id/budget', async (req, res) => {
   try {
     const projectId = req.params.id;
-    const { filename, costCodeHours, areaHours } = req.body;
+    const { filename, costCodeHours, areaHours, costCodeNames } = req.body;
 
     if (!costCodeHours || typeof costCodeHours !== 'object') {
       return res.status(400).json({ error: 'No budget data provided' });
@@ -430,8 +454,20 @@ app.post('/api/projects/:id/budget', async (req, res) => {
       });
     }
 
-    const result = await budgetQueries.create(projectId, filename || 'Budget Upload', normalizedHours, areaHoursClean);
-    const { comparison, latestBudget, budgetUploads } = await buildBudgetComparison(projectId, { cost_code_hours: normalizedHours, area_hours: areaHoursClean });
+    const costCodeNamesClean = {};
+    if (costCodeNames && typeof costCodeNames === 'object') {
+      Object.entries(costCodeNames).forEach(([code, name]) => {
+        const normalizedCode = normalizeCostCode(code);
+        const cleanName = name?.toString().trim();
+        if (!normalizedCode || !cleanName) return;
+        if (!costCodeNamesClean[normalizedCode]) {
+          costCodeNamesClean[normalizedCode] = cleanName;
+        }
+      });
+    }
+
+    const result = await budgetQueries.create(projectId, filename || 'Budget Upload', normalizedHours, areaHoursClean, costCodeNamesClean);
+    const { comparison, latestBudget, budgetUploads, costCodeNames: alignedCostCodeNames } = await buildBudgetComparison(projectId, { cost_code_hours: normalizedHours, area_hours: areaHoursClean, cost_code_names: costCodeNamesClean });
     const areaComparison = await buildAreaComparison(projectId, { area_hours: areaHoursClean });
 
     res.json({
@@ -441,7 +477,8 @@ app.post('/api/projects/:id/budget', async (req, res) => {
       uploads: budgetUploads,
       latest: latestBudget,
       comparison,
-      areaComparison
+      areaComparison,
+      costCodeNames: alignedCostCodeNames
     });
   } catch (error) {
     console.error('Error saving budget:', error);
@@ -452,13 +489,14 @@ app.post('/api/projects/:id/budget', async (req, res) => {
 // Get budget summary and uploads
 app.get('/api/projects/:id/budget', async (req, res) => {
   try {
-    const { comparison, latestBudget, budgetUploads } = await buildBudgetComparison(req.params.id);
+    const { comparison, latestBudget, budgetUploads, costCodeNames } = await buildBudgetComparison(req.params.id);
     const areaComparison = await buildAreaComparison(req.params.id);
     res.json({
       uploads: budgetUploads,
       latest: latestBudget,
       comparison,
-      areaComparison
+      areaComparison,
+      costCodeNames
     });
   } catch (error) {
     console.error('Error fetching budget data:', error);
@@ -563,7 +601,7 @@ app.post('/api/comparison/timeline', async (req, res) => {
     const comparisonData = await Promise.all(
       projectIds.map(async (projectId) => {
         const { entries, rawEntries, projectStartDate, employeeStats } = await comparisonQueries.getProjectTimeline(projectId);
-        const { comparison: budgetComparison } = await buildBudgetComparison(projectId);
+        const { comparison: budgetComparison, costCodeNames } = await buildBudgetComparison(projectId);
 
         const totalBudgetHours = budgetComparison.reduce((sum, row) => sum + (Number(row.budget_hours) || 0), 0);
         const totalActualHours = budgetComparison.reduce((sum, row) => sum + (Number(row.actual_hours) || 0), 0);
@@ -575,6 +613,7 @@ app.post('/api/comparison/timeline', async (req, res) => {
           projectStartDate,
           employeeStats,
           budgetComparison,
+          costCodeNames,
           budgetSummary: {
             budgetedHours: totalBudgetHours,
             actualHours: totalActualHours,
