@@ -157,6 +157,7 @@
     let comparisonData = [];
     let comparisonCostCodeList = [];
     let selectedComparisonCostCodes = new Set();
+    let comparisonCostCodeNames = {};
     let comparisonChart = null;
     let employeeComparisonChart = null;
     let costCodeVarianceChart = null;
@@ -232,6 +233,7 @@
         });
 
         comparisonData = await response.json();
+        comparisonCostCodeNames = buildComparisonCostCodeNames(comparisonData);
 
         document.getElementById('emptyState').style.display = 'none';
         document.getElementById('metricsComparison').style.display = 'block';
@@ -280,7 +282,7 @@
       comparisonCostCodeList.forEach(code => {
         const label = document.createElement('label');
         label.className = 'checkbox chip';
-        label.title = `Toggle ${code}`;
+        label.title = formatComparisonCostCodeLabel(code);
 
         const input = document.createElement('input');
         input.type = 'checkbox';
@@ -413,6 +415,22 @@
 
       chartData = applyAverageCurve(chartData);
 
+      const tooltipCallbacks = {};
+
+      if (viewType === 'costCode') {
+        tooltipCallbacks.label = (context) => {
+          const value = context.parsed.y;
+          const rawLabel = context.dataset.label || '';
+          const labelParts = rawLabel.split(' - ');
+          const code = labelParts.pop();
+          const projectLabel = labelParts.join(' - ');
+          const costCodeLabel = formatComparisonCostCodeLabel(code);
+          const displayLabel = projectLabel ? `${projectLabel} - ${costCodeLabel}` : costCodeLabel;
+          const formattedHours = Number.isFinite(value) ? formatHours(value) : '0.00';
+          return `${displayLabel}: ${formattedHours} hrs`;
+        };
+      }
+
       comparisonChart = new Chart(ctx, {
         type: 'line',
         data: chartData,
@@ -426,7 +444,8 @@
             },
             tooltip: {
               mode: 'index',
-              intersect: false
+              intersect: false,
+              callbacks: tooltipCallbacks
             }
           },
           scales: {
@@ -934,6 +953,7 @@
                   const code = context.label;
                   const row = context.dataset.costCodeRows?.[code];
                   const varianceHours = context.parsed.y;
+                  const costCodeLabel = formatComparisonCostCodeLabel(code);
                   const varianceLabel = Number.isFinite(varianceHours)
                     ? varianceHours.toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })
                     : '—';
@@ -943,7 +963,7 @@
                   const budget = formatHours(row.budget_hours);
                   const actual = formatHours(row.actual_hours);
                   const percent = formatPercentVariance(row.variance_percent);
-                  return `${context.dataset.label} – ${code}: ${varianceLabel} hrs (Budget: ${budget}, Spent: ${actual}, %: ${percent})`;
+                  return `${context.dataset.label} – ${costCodeLabel}: ${varianceLabel} hrs (Budget: ${budget}, Spent: ${actual}, %: ${percent})`;
                 }
               }
             }
@@ -1075,6 +1095,52 @@
       if (value === null || value === undefined || Number.isNaN(value)) return '—';
       const sign = value > 0 ? '+' : '';
       return `${sign}${Number(value).toFixed(1)}%`;
+    }
+
+    function normalizeCostCodeValue(code) {
+      if (code === undefined || code === null) return null;
+      const [mainPart] = code.toString().split('.');
+      const numeric = mainPart.replace(/\D/g, '').trim();
+      return numeric || null;
+    }
+
+    function buildComparisonCostCodeNames(data = []) {
+      const map = {};
+
+      data.forEach(project => {
+        Object.entries(project.costCodeNames || {}).forEach(([code, name]) => {
+          const normalized = normalizeCostCodeValue(code);
+          const cleanName = name?.toString().trim();
+          if (!normalized || !cleanName) return;
+          if (!map[normalized]) {
+            map[normalized] = cleanName;
+          }
+        });
+
+        (project.budgetComparison || []).forEach(row => {
+          if (!row.cost_code || !row.cost_code_name) return;
+          const normalized = normalizeCostCodeValue(row.cost_code);
+          const cleanName = row.cost_code_name?.toString().trim();
+          if (!normalized || !cleanName) return;
+          if (!map[normalized]) {
+            map[normalized] = cleanName;
+          }
+        });
+      });
+
+      return map;
+    }
+
+    function getComparisonCostCodeName(code) {
+      const normalized = normalizeCostCodeValue(code);
+      if (!normalized) return null;
+      return comparisonCostCodeNames?.[normalized] || null;
+    }
+
+    function formatComparisonCostCodeLabel(code) {
+      if (!code && code !== 0) return 'Unknown';
+      const name = getComparisonCostCodeName(code);
+      return name ? `${code} — ${name}` : code.toString();
     }
 
     function normalizeCostCodeLabel(code) {
