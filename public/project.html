@@ -147,9 +147,14 @@
       </div>
 
       <div class="card" style="margin-top: 1.5rem;">
-        <div class="card-header">
-          <h3 class="card-title">Budget Summary</h3>
-          <div id="budgetMeta" style="color: var(--text-secondary); font-size: 0.9rem;">Loading budget...</div>
+        <div class="card-header" style="align-items: flex-start; justify-content: space-between; gap: 1rem;">
+          <div>
+            <h3 class="card-title">Budget Summary</h3>
+            <div id="budgetMeta" style="color: var(--text-secondary); font-size: 0.9rem;">Loading budget...</div>
+          </div>
+          <label style="display: inline-flex; align-items: center; gap: 0.35rem; font-size: 0.9rem; color: var(--text-secondary);">
+            <input type="checkbox" id="budgetApplyFiltersToggle" onchange="handleBudgetFiltersToggle()"> Apply monthly hours filters
+          </label>
         </div>
         <div id="budgetSummary" style="margin-top: 1rem;">Loading budget...</div>
         <div id="areaVarianceSummary" style="margin-top: 1.25rem;"></div>
@@ -528,7 +533,7 @@
       }
 
       updateCostCodeMasterCheckboxes();
-      updateChart();
+      refreshFilterConsumers();
     }
 
     function toggleAllCostCodes(event) {
@@ -542,7 +547,7 @@
 
       renderCostCodeList();
       updateCostCodeMasterCheckboxes();
-      updateChart();
+      refreshFilterConsumers();
     }
 
     function toggleDivisionCostCodes(event, prefixes) {
@@ -560,7 +565,7 @@
 
       renderCostCodeList();
       updateCostCodeMasterCheckboxes();
-      updateChart();
+      refreshFilterConsumers();
     }
 
     function updateCostCodeMasterCheckboxes() {
@@ -631,7 +636,7 @@
       }
 
       updateJobMasterCheckboxes();
-      updateChart();
+      refreshFilterConsumers();
     }
 
     function toggleAllJobs(event) {
@@ -645,7 +650,7 @@
 
       renderJobList();
       updateJobMasterCheckboxes();
-      updateChart();
+      refreshFilterConsumers();
     }
 
     function updateJobMasterCheckboxes() {
@@ -657,6 +662,14 @@
         allToggle.indeterminate = selectedCount > 0 && selectedCount < totalCount;
         allToggle.checked = totalCount > 0 && selectedCount === totalCount;
       }
+    }
+
+    function refreshFilterConsumers() {
+      updateChart();
+      renderEmployeeChart();
+      renderBudgetSummary();
+      renderBudgetCharts();
+      renderAreaVarianceSummary();
     }
 
     function toggleFilterSection(sectionId, trigger) {
@@ -942,11 +955,13 @@
       const latest = budgetData.latest;
       metaEl.textContent = `Latest: ${escapeHtml(latest.filename)} • ${new Date(latest.upload_date).toLocaleString()}`;
 
-      const totalBudgetHours = Object.values(latest.cost_code_hours || {}).reduce((sum, val) => sum + Number(val || 0), 0);
-      const totalActualHours = budgetComparison.reduce((sum, row) => sum + (row.actual_hours || 0), 0);
-      const totalVariance = totalActualHours - totalBudgetHours;
+      const applyFilters = document.getElementById('budgetApplyFiltersToggle')?.checked ?? false;
+      const varianceRows = buildBudgetChartRows(applyFilters);
 
-      const varianceRows = sortBudgetRows(budgetComparison);
+      const totalBudgetHours = varianceRows.reduce((sum, row) => sum + (Number(row.budget_hours) || 0), 0);
+      const totalActualHours = varianceRows.reduce((sum, row) => sum + (Number(row.actual_hours) || 0), 0);
+      const totalVariance = totalActualHours - totalBudgetHours;
+      const sortedRows = sortBudgetRows(varianceRows);
 
       summaryEl.innerHTML = `
         <div style="display: grid; gap: 1rem;">
@@ -964,7 +979,7 @@
               <div style="color: var(--text-secondary); font-size: 0.9rem;">Variance (hrs)</div>
             </div>
           </div>
-          ${varianceRows.length ? `
+          ${sortedRows.length ? `
             <div style="overflow-x: auto;">
               <table style="width: 100%; border-collapse: collapse;">
                 <thead>
@@ -998,7 +1013,7 @@
                   </tr>
                 </thead>
                 <tbody>
-                  ${varianceRows.map(row => `
+                  ${sortedRows.map(row => `
                     <tr style="border-bottom: 1px solid var(--border-color);">
                       <td style="padding: 0.5rem; font-weight: 600;">${escapeHtml(row.cost_code)}</td>
                       <td style="padding: 0.5rem; color: var(--text-secondary);">${escapeHtml(row.cost_code_name || getCostCodeName(row.cost_code) || '—')}</td>
@@ -1014,6 +1029,12 @@
           ` : '<p style="color: var(--text-secondary);">No budget variance to display yet.</p>'}
         </div>
       `;
+    }
+
+    function handleBudgetFiltersToggle() {
+      renderBudgetSummary();
+      renderBudgetCharts();
+      renderAreaVarianceSummary();
     }
 
     function changeBudgetSort(column) {
