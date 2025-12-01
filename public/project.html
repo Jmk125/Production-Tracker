@@ -1364,7 +1364,7 @@
       const currentMode = document.getElementById('areaVarianceChartMode')?.value || 'hours';
       const viewMode = document.getElementById('areaVarianceViewMode')?.value || 'area';
       const stackBars = document.getElementById('areaVarianceStackToggle')?.checked ?? true;
-      const applyFilters = document.getElementById('areaVarianceApplyFiltersToggle')?.checked;
+      const applyFilters = document.getElementById('areaVarianceApplyFiltersToggle')?.checked ?? false;
       if (!container) return;
 
       if (!areaData || !Array.isArray(areaData.comparison) || areaData.comparison.length === 0) {
@@ -1410,9 +1410,9 @@
             <label style="display: inline-flex; align-items: center; gap: 0.35rem; font-size: 0.9rem; color: var(--text-secondary);">
               <input type="checkbox" id="areaVarianceStackToggle" ${stackBars ? 'checked' : ''} onchange="renderAreaVarianceSummary()"> Stack bars
             </label>
-            <label style="display: inline-flex; align-items: center; gap: 0.35rem; font-size: 0.9rem; color: var(--text-secondary);">
-              <input type="checkbox" id="areaVarianceApplyFiltersToggle" onchange="renderAreaVarianceSummary()"> Apply monthly hours filters
-            </label>
+              <label style="display: inline-flex; align-items: center; gap: 0.35rem; font-size: 0.9rem; color: var(--text-secondary);">
+                <input type="checkbox" id="areaVarianceApplyFiltersToggle" ${applyFilters ? 'checked' : ''} onchange="renderAreaVarianceSummary()"> Apply monthly hours filters
+              </label>
           </div>
         </div>
         <div style="overflow-x: auto;">
