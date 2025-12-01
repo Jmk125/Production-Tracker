@@ -202,14 +202,14 @@
         <div class="card-header">
           <div>
             <h3 class="card-title" style="margin-bottom: 0.25rem;">Upload Budget Spreadsheet</h3>
-            <p style="color: var(--text-secondary); font-size: 0.9rem;">We'll read cost codes from column B and labor hours from column I, then total by cost code.</p>
+            <p style="color: var(--text-secondary); font-size: 0.9rem;">We'll read cost codes from column B, cost code names from column C, and labor hours from column I.</p>
           </div>
         </div>
 
         <div id="budgetUploadArea" class="upload-area">
           <input type="file" id="budgetFileInput" accept=".xlsx,.xls" style="display: none;" onchange="handleBudgetFileSelect(event)">
           <p style="font-size: 1.125rem; margin-bottom: 0.5rem;">📊 Drop Excel budget here or click to browse</p>
-          <p style="color: var(--text-secondary); font-size: 0.875rem;">Excel files with cost codes in column D and hours in column K.</p>
+          <p style="color: var(--text-secondary); font-size: 0.875rem;">Excel files with cost codes in column B, names in column C, and hours in column I.</p>
         </div>
 
         <div id="budgetUploadProgress" style="display: none; margin-top: 1rem;">
@@ -389,6 +389,8 @@
         costCodeNames = budgetData.costCodeNames || budgetData.latest?.cost_code_names || {};
         areaData = budgetData.areaComparison || areaData;
 
+        mergeCostCodeNamesFromRows(budgetComparison);
+
         renderCostCodeList();
 
         renderBudgetSummary();
@@ -400,6 +402,21 @@
         console.error('Error loading budget data:', error);
         document.getElementById('budgetSummary').textContent = 'Unable to load budget data.';
       }
+    }
+
+    function mergeCostCodeNamesFromRows(rows = []) {
+      const updated = { ...(costCodeNames || {}) };
+
+      rows.forEach(row => {
+        const normalized = normalizeCostCodeClient(row.cost_code);
+        const name = row.cost_code_name?.toString().trim();
+        if (!normalized || !name) return;
+        if (!updated[normalized]) {
+          updated[normalized] = name;
+        }
+      });
+
+      costCodeNames = updated;
     }
 
     async function loadAreaData() {
@@ -484,7 +501,7 @@
         input.addEventListener('change', handleCostCodeToggle);
 
         label.appendChild(input);
-        label.appendChild(document.createTextNode(` ${code}`));
+        label.appendChild(document.createTextNode(` ${formatCostCodeLabel(code)}`));
 
         list.appendChild(label);
       });
@@ -931,6 +948,7 @@
                         Cost Code ${renderSortIndicator('cost_code')}
                       </button>
                     </th>
+                    <th style="text-align: left; padding: 0.5rem;">Name</th>
                     <th style="text-align: right; padding: 0.5rem;">
                       <button class="sort-button" type="button" onclick="changeBudgetSort('budget_hours')">
                         Budget ${renderSortIndicator('budget_hours')}
@@ -957,6 +975,7 @@
                   ${varianceRows.map(row => `
                     <tr style="border-bottom: 1px solid var(--border-color);">
                       <td style="padding: 0.5rem; font-weight: 600;">${escapeHtml(row.cost_code)}</td>
+                      <td style="padding: 0.5rem; color: var(--text-secondary);">${escapeHtml(row.cost_code_name || getCostCodeName(row.cost_code) || '—')}</td>
                       <td style="padding: 0.5rem; text-align: right;">${formatHours(row.budget_hours)}</td>
                       <td style="padding: 0.5rem; text-align: right;">${formatHours(row.actual_hours)}</td>
                       <td style="padding: 0.5rem; text-align: right;">${formatVarianceBadge(row.variance_hours)}</td>
@@ -1024,20 +1043,22 @@
 
       container.innerHTML = `
         <div style="overflow-x: auto;">
-          <table style="width: 100%; border-collapse: collapse;">
-            <thead>
-              <tr style="border-bottom: 2px solid var(--border-color);">
-                <th style="text-align: left; padding: 0.6rem;">Cost Code</th>
-                <th style="text-align: right; padding: 0.6rem;">Budget Hours</th>
-                <th style="text-align: right; padding: 0.6rem;">Hours Spent</th>
-                <th style="text-align: right; padding: 0.6rem;">Variance (hrs)</th>
-                <th style="text-align: right; padding: 0.6rem;">Variance (%)</th>
+              <table style="width: 100%; border-collapse: collapse;">
+                <thead>
+                  <tr style="border-bottom: 2px solid var(--border-color);">
+                    <th style="text-align: left; padding: 0.6rem;">Cost Code</th>
+                    <th style="text-align: left; padding: 0.6rem;">Name</th>
+                    <th style="text-align: right; padding: 0.6rem;">Budget Hours</th>
+                    <th style="text-align: right; padding: 0.6rem;">Hours Spent</th>
+                    <th style="text-align: right; padding: 0.6rem;">Variance (hrs)</th>
+                    <th style="text-align: right; padding: 0.6rem;">Variance (%)</th>
               </tr>
             </thead>
             <tbody>
               ${rows.map(row => `
                 <tr style="border-bottom: 1px solid var(--border-color);">
                   <td style="padding: 0.6rem; font-weight: 600;">${escapeHtml(row.cost_code)}</td>
+                  <td style="padding: 0.6rem; color: var(--text-secondary);">${escapeHtml(row.cost_code_name || getCostCodeName(row.cost_code) || '—')}</td>
                   <td style="padding: 0.6rem; text-align: right;">${formatHours(row.budget_hours)}</td>
                   <td style="padding: 0.6rem; text-align: right;">${formatHours(row.actual_hours)}</td>
                   <td style="padding: 0.6rem; text-align: right;">${formatVarianceBadge(row.variance_hours)}</td>
@@ -1389,6 +1410,7 @@
       const rowsHtml = breakdown.entries.map(entry => `
         <tr>
           <td class="area-cell">${escapeHtml(entry.cost_code)}</td>
+          <td class="area-cell" style="color: var(--text-secondary);">${escapeHtml(getCostCodeName(entry.cost_code) || '—')}</td>
           <td class="number-cell">${formatHours(entry.budget_hours)}</td>
           <td class="number-cell">${formatHours(entry.actual_hours)}</td>
           <td class="number-cell">${formatVarianceBadge(entry.variance_hours)}</td>
@@ -1403,6 +1425,7 @@
             <thead>
               <tr>
                 <th style="text-align: left;">Cost code</th>
+                <th style="text-align: left;">Name</th>
                 <th class="number-cell">Budgeted</th>
                 <th class="number-cell">Spent</th>
                 <th class="number-cell">Variance</th>
@@ -2048,6 +2071,7 @@
           budgetData = result;
           budgetComparison = result.comparison || [];
           costCodeNames = result.costCodeNames || result.latest?.cost_code_names || {};
+          mergeCostCodeNamesFromRows(budgetComparison);
           renderCostCodeList();
           renderBudgetSummary();
           renderBudgetUploads(result.uploads || []);
