@@ -1524,14 +1524,15 @@
 
                   if (viewMode === 'costCode') {
                     const costCode = context.dataset.label;
+                    const costCodeLabel = formatCostCodeLabel(costCode);
                     const entry = (breakdownMap[row.key]?.entries || []).find(item => item.cost_code === costCode);
                     const percent = entry && Number.isFinite(entry.variance_percent)
                       ? `${entry.variance_percent.toFixed(1)}%`
                       : 'N/A';
 
-                    if (!entry) return `${costCode}: 0`;
-                    if (mode === 'percent') return `${costCode}: ${percent}`;
-                    return `${costCode}: ${formatHours(entry.variance_hours)} hrs (Budget ${formatHours(entry.budget_hours)}, Actual ${formatHours(entry.actual_hours)})`;
+                    if (!entry) return `${costCodeLabel}: 0`;
+                    if (mode === 'percent') return `${costCodeLabel}: ${percent}`;
+                    return `${costCodeLabel}: ${formatHours(entry.variance_hours)} hrs (Budget ${formatHours(entry.budget_hours)}, Actual ${formatHours(entry.actual_hours)})`;
                   }
 
                   const percent = Number.isFinite(row.variance_percent) ? `${row.variance_percent.toFixed(1)}%` : 'N/A';
