@@ -1089,8 +1089,12 @@
       });
 
       const budgetHours = budgetData.latest.cost_code_hours || {};
+      const selectedBudgetCodes = new Set(
+        Object.keys(budgetHours).filter(code => selectedCostCodes.has(normalizeCostCodeClient(code)))
+      );
+
       const allCodes = new Set([
-        ...Object.keys(budgetHours),
+        ...selectedBudgetCodes,
         ...Object.keys(actualTotals)
       ]);
 
@@ -1299,7 +1303,14 @@
       const filteredBreakdown = {};
 
       rows.forEach(row => {
-        if (!selectedJobs.has(normalizeJobLabel(row.key))) return;
+        const normalizedKey = normalizeJobLabel(row.key);
+        const normalizedArea = normalizeJobLabel(row.area);
+        const hasJobFilter = selectedJobs.size > 0;
+        const matchesJobSelection = !hasJobFilter
+          || selectedJobs.has(normalizedKey)
+          || selectedJobs.has(normalizedArea);
+
+        if (!matchesJobSelection) return;
 
         const sourceBreakdown = breakdownSource?.[row.key]?.entries || [];
         const entries = sourceBreakdown.filter(entry => selectedCostCodes.has(normalizeCostCodeLabel(entry.cost_code)));
