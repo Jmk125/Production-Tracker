@@ -45,37 +45,25 @@ function normalizeJobLabel(value) {
 
 // Align budget codes to payroll codes by matching on numeric prefixes
 function alignBudgetCostCodes(budgetHours = {}, actualTotals = {}) {
-  const actualCodes = Object.keys(actualTotals || {});
   const aligned = {};
 
+  // Both budget and actual codes are already normalized, so just use budget codes directly
   Object.entries(budgetHours || {}).forEach(([budgetCode, hours]) => {
     if (!budgetCode) return;
-
-    const matchingActual = actualCodes
-      .filter(code => budgetCode.startsWith(code))
-      .sort((a, b) => b.length - a.length)[0];
-
-    const targetCode = matchingActual || budgetCode;
-    aligned[targetCode] = (aligned[targetCode] || 0) + hours;
+    aligned[budgetCode] = (aligned[budgetCode] || 0) + hours;
   });
 
   return aligned;
 }
 
 function alignCostCodeNames(budgetNames = {}, actualTotals = {}) {
-  const actualCodes = Object.keys(actualTotals || {});
   const aligned = {};
 
+  // Both budget and actual codes are already normalized, so just use budget names directly
   Object.entries(budgetNames || {}).forEach(([budgetCode, name]) => {
     if (!budgetCode || !name) return;
-
-    const matchingActual = actualCodes
-      .filter(code => budgetCode.startsWith(code))
-      .sort((a, b) => b.length - a.length)[0];
-
-    const targetCode = matchingActual || budgetCode;
-    if (!aligned[targetCode]) {
-      aligned[targetCode] = name;
+    if (!aligned[budgetCode]) {
+      aligned[budgetCode] = name;
     }
   });
 
