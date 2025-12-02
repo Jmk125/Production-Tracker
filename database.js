@@ -250,7 +250,7 @@ const timeEntryQueries = {
           days: {}
         };
       }
-      monthlyData[month].total_hours += entry.hours;
+      monthlyData[month].total_hours += Number(entry.hours) || 0;
       monthlyData[month].employees.add(entry.employee_name);
 
       if (!monthlyData[month].days[entry.date]) {
@@ -297,7 +297,7 @@ const timeEntryQueries = {
           total_hours: 0
         };
       }
-      aggregated[key].total_hours += entry.hours;
+      aggregated[key].total_hours += Number(entry.hours) || 0;
     });
 
     return Object.values(aggregated).sort((a, b) => a.month.localeCompare(b.month));
@@ -312,7 +312,7 @@ const timeEntryQueries = {
       if (!entry.cost_code) return;
       const code = normalizeCostCode(entry.cost_code);
       if (!code) return;
-      totals[code] = (totals[code] || 0) + entry.hours;
+      totals[code] = (totals[code] || 0) + (Number(entry.hours) || 0);
     });
 
     return totals;
