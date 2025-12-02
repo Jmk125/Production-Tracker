@@ -1516,12 +1516,38 @@
       const breakdownSource = areaData?.costCodeBreakdown || {};
       const mergedBreakdown = mergeAreaBreakdown(breakdownSource);
 
+      const budgetByAreaKey = rows.reduce((map, row) => {
+        map.set(row.key, Number(row.budget_hours) || 0);
+        return map;
+      }, new Map());
+
       const recomputedRows = rows.map(row => {
         const mergedEntries = mergedBreakdown?.[row.key]?.entries || [];
-        const actualHours = mergedEntries.reduce((sum, entry) => sum + (Number(entry.actual_hours) || 0), 0);
-        const budgetHours = mergedEntries.reduce((sum, entry) => sum + (Number(entry.budget_hours) || 0), 0);
+        const targetBudget = budgetByAreaKey.get(row.key) ?? 0;
+        const breakdownBudget = mergedEntries.reduce((sum, entry) => sum + (Number(entry.budget_hours) || 0), 0);
+        const budgetScale = breakdownBudget > 0 && targetBudget > 0 ? targetBudget / breakdownBudget : 1;
+
+        const scaledEntries = mergedEntries.map(entry => {
+          const budgetHours = (Number(entry.budget_hours) || 0) * budgetScale;
+          const actualHours = Number(entry.actual_hours) || 0;
+          const varianceHours = actualHours - budgetHours;
+          const variancePercent = budgetHours > 0 ? (varianceHours / budgetHours) * 100 : null;
+
+          return {
+            ...entry,
+            budget_hours: budgetHours,
+            actual_hours: actualHours,
+            variance_hours: varianceHours,
+            variance_percent: variancePercent
+          };
+        });
+
+        const actualHours = scaledEntries.reduce((sum, entry) => sum + (Number(entry.actual_hours) || 0), 0);
+        const budgetHours = scaledEntries.reduce((sum, entry) => sum + (Number(entry.budget_hours) || 0), 0);
         const varianceHours = actualHours - budgetHours;
         const variancePercent = budgetHours > 0 ? (varianceHours / budgetHours) * 100 : null;
+
+        mergedBreakdown[row.key] = { entries: scaledEntries };
 
         return {
           ...row,
@@ -1709,6 +1735,15 @@
           <canvas id="areaVarianceChart" aria-label="Variance by area chart"></canvas>
         </div>
       `;
+
+      const toggles = container.querySelectorAll('#areaApplyFiltersToggle');
+      if (toggles.length > 1) {
+        toggles.forEach((toggle, index) => {
+          if (index > 0) {
+            toggle.closest('label')?.remove();
+          }
+        });
+      }
 
       renderAreaVarianceChart(sortedRows, currentMode, viewMode, stackBars, breakdownMap);
     }
