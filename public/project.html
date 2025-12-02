@@ -147,9 +147,14 @@
       </div>
 
       <div class="card" style="margin-top: 1.5rem;">
-        <div class="card-header">
-          <h3 class="card-title">Budget Summary</h3>
-          <div id="budgetMeta" style="color: var(--text-secondary); font-size: 0.9rem;">Loading budget...</div>
+        <div class="card-header" style="align-items: flex-start; justify-content: space-between; gap: 1rem;">
+          <div>
+            <h3 class="card-title">Budget Summary</h3>
+            <div id="budgetMeta" style="color: var(--text-secondary); font-size: 0.9rem;">Loading budget...</div>
+          </div>
+          <label style="display: inline-flex; align-items: center; gap: 0.35rem; font-size: 0.9rem; color: var(--text-secondary);">
+            <input type="checkbox" id="budgetApplyFiltersToggle" onchange="handleBudgetFiltersToggle()"> Apply monthly hours filters
+          </label>
         </div>
         <div id="budgetSummary" style="margin-top: 1rem;">Loading budget...</div>
         <div id="areaVarianceSummary" style="margin-top: 1.25rem;"></div>
@@ -309,16 +314,21 @@
     let budgetData = null;
     let budgetComparison = [];
     let costCodeNames = {};
+    let manualCostCodeMerges = {};
     let areaData = { comparison: [], budgetAreas: [], actualAreas: [], mappings: {}, adjustments: { budget: {}, actual: {} } };
+    let areaBreakdownView = {};
+    let areaApplyFiltersEnabled = false;
     let budgetSort = { column: 'variance_hours', direction: 'desc' };
     let areaSort = { column: 'variance_hours', direction: 'desc' };
     let hoursChart = null;
     let payClassChart = null;
     let budgetChart = null;
+    let lastBudgetVarianceRows = [];
     let areaVarianceChart = null;
     let employeeChart = null;
 
     document.addEventListener('DOMContentLoaded', async () => {
+      loadCostCodeMerges();
       await loadProject();
       await loadTimeEntries();
       await loadDetailedStats();
@@ -348,6 +358,38 @@
       } catch (error) {
         console.error('Error loading project:', error);
       }
+    }
+
+    function loadCostCodeMerges() {
+      try {
+        const raw = localStorage.getItem(`manualCostCodeMerges_${projectId}`);
+        manualCostCodeMerges = raw ? JSON.parse(raw) : {};
+      } catch (error) {
+        console.warn('Unable to load cost code merges', error);
+        manualCostCodeMerges = {};
+      }
+    }
+
+    function persistCostCodeMerges() {
+      try {
+        localStorage.setItem(`manualCostCodeMerges_${projectId}`, JSON.stringify(manualCostCodeMerges));
+      } catch (error) {
+        console.warn('Unable to save cost code merges', error);
+      }
+    }
+
+    function applyCostCodeMerge(code) {
+      if (!code) return code;
+
+      let current = code;
+      const seen = new Set();
+
+      while (manualCostCodeMerges[current] && !seen.has(current)) {
+        seen.add(current);
+        current = manualCostCodeMerges[current];
+      }
+
+      return current;
     }
 
     async function loadTimeEntries() {
@@ -396,7 +438,6 @@
         renderBudgetSummary();
         renderBudgetUploads(budgetData.uploads || []);
         renderBudgetBreakdown();
-        renderBudgetCharts();
         renderAreaSection();
       } catch (error) {
         console.error('Error loading budget data:', error);
@@ -524,7 +565,7 @@
       }
 
       updateCostCodeMasterCheckboxes();
-      updateChart();
+      refreshFilterConsumers();
     }
 
     function toggleAllCostCodes(event) {
@@ -538,7 +579,7 @@
 
       renderCostCodeList();
       updateCostCodeMasterCheckboxes();
-      updateChart();
+      refreshFilterConsumers();
     }
 
     function toggleDivisionCostCodes(event, prefixes) {
@@ -556,7 +597,7 @@
 
       renderCostCodeList();
       updateCostCodeMasterCheckboxes();
-      updateChart();
+      refreshFilterConsumers();
     }
 
     function updateCostCodeMasterCheckboxes() {
@@ -627,7 +668,7 @@
       }
 
       updateJobMasterCheckboxes();
-      updateChart();
+      refreshFilterConsumers();
     }
 
     function toggleAllJobs(event) {
@@ -641,7 +682,7 @@
 
       renderJobList();
       updateJobMasterCheckboxes();
-      updateChart();
+      refreshFilterConsumers();
     }
 
     function updateJobMasterCheckboxes() {
@@ -653,6 +694,14 @@
         allToggle.indeterminate = selectedCount > 0 && selectedCount < totalCount;
         allToggle.checked = totalCount > 0 && selectedCount === totalCount;
       }
+    }
+
+    function refreshFilterConsumers() {
+      updateChart();
+      renderEmployeeChart();
+      renderBudgetSummary();
+      renderBudgetCharts();
+      renderAreaVarianceSummary();
     }
 
     function toggleFilterSection(sectionId, trigger) {
@@ -667,10 +716,32 @@
       }
     }
 
+    function getSelectedCostCodeClients() {
+      return new Set(
+        Array.from(selectedCostCodes)
+          .map(code => normalizeCostCodeClient(code))
+          .filter(Boolean)
+      );
+    }
+
+    function isCostCodeSelected(code) {
+      if (!selectedCostCodes.size) return false;
+
+      const labelCode = normalizeCostCodeLabel(code);
+      const clientCode = normalizeCostCodeClient(code);
+      const selectedClients = getSelectedCostCodeClients();
+
+      return (
+        selectedCostCodes.has(labelCode)
+        || (clientCode && selectedCostCodes.has(clientCode))
+        || (clientCode && selectedClients.has(clientCode))
+      );
+    }
+
     function filterBySelectedCostCodes(data) {
       if (!selectedCostCodes.size) return [];
 
-      return data.filter(entry => selectedCostCodes.has(normalizeCostCodeLabel(entry.cost_code)));
+      return data.filter(entry => isCostCodeSelected(entry.cost_code));
     }
 
     function filterBySelectedJobs(data) {
@@ -916,11 +987,14 @@
       const latest = budgetData.latest;
       metaEl.textContent = `Latest: ${escapeHtml(latest.filename)} • ${new Date(latest.upload_date).toLocaleString()}`;
 
-      const totalBudgetHours = Object.values(latest.cost_code_hours || {}).reduce((sum, val) => sum + Number(val || 0), 0);
-      const totalActualHours = budgetComparison.reduce((sum, row) => sum + (row.actual_hours || 0), 0);
-      const totalVariance = totalActualHours - totalBudgetHours;
+      const applyFilters = document.getElementById('budgetApplyFiltersToggle')?.checked ?? false;
+      const varianceRows = buildBudgetChartRows(applyFilters);
+      lastBudgetVarianceRows = varianceRows;
 
-      const varianceRows = sortBudgetRows(budgetComparison);
+      const totalBudgetHours = varianceRows.reduce((sum, row) => sum + (Number(row.budget_hours) || 0), 0);
+      const totalActualHours = varianceRows.reduce((sum, row) => sum + (Number(row.actual_hours) || 0), 0);
+      const totalVariance = totalActualHours - totalBudgetHours;
+      const sortedRows = sortBudgetRows(varianceRows);
 
       summaryEl.innerHTML = `
         <div style="display: grid; gap: 1rem;">
@@ -938,7 +1012,7 @@
               <div style="color: var(--text-secondary); font-size: 0.9rem;">Variance (hrs)</div>
             </div>
           </div>
-          ${varianceRows.length ? `
+          ${sortedRows.length ? `
             <div style="overflow-x: auto;">
               <table style="width: 100%; border-collapse: collapse;">
                 <thead>
@@ -969,10 +1043,11 @@
                         % Variance ${renderSortIndicator('variance_percent')}
                       </button>
                     </th>
+                    <th style="text-align: right; padding: 0.5rem;">Merge</th>
                   </tr>
                 </thead>
                 <tbody>
-                  ${varianceRows.map(row => `
+                  ${sortedRows.map(row => `
                     <tr style="border-bottom: 1px solid var(--border-color);">
                       <td style="padding: 0.5rem; font-weight: 600;">${escapeHtml(row.cost_code)}</td>
                       <td style="padding: 0.5rem; color: var(--text-secondary);">${escapeHtml(row.cost_code_name || getCostCodeName(row.cost_code) || '—')}</td>
@@ -980,6 +1055,11 @@
                       <td style="padding: 0.5rem; text-align: right;">${formatHours(row.actual_hours)}</td>
                       <td style="padding: 0.5rem; text-align: right;">${formatVarianceBadge(row.variance_hours)}</td>
                       <td style="padding: 0.5rem; text-align: right;">${formatPercentVariance(row.variance_percent)}</td>
+                      <td style="padding: 0.5rem; text-align: right;">
+                        <button type="button" class="secondary-button" style="padding: 0.25rem 0.6rem; font-size: 0.813rem;" onclick="promptMergeCostCode('${escapeHtml(row.cost_code)}')">
+                          Merge
+                        </button>
+                      </td>
                     </tr>
                   `).join('')}
                 </tbody>
@@ -988,6 +1068,12 @@
           ` : '<p style="color: var(--text-secondary);">No budget variance to display yet.</p>'}
         </div>
       `;
+
+      renderBudgetCharts(varianceRows);
+    }
+
+    function handleBudgetFiltersToggle() {
+      renderBudgetSummary();
     }
 
     function changeBudgetSort(column) {
@@ -998,7 +1084,6 @@
       }
 
       renderBudgetSummary();
-      renderBudgetCharts();
     }
 
     function renderSortIndicator(column) {
@@ -1030,6 +1115,78 @@
       });
     }
 
+    function getAllKnownCostCodes() {
+      const codes = new Set();
+
+      (lastBudgetVarianceRows || []).forEach(row => {
+        if (row?.cost_code) codes.add(row.cost_code);
+      });
+
+      (budgetComparison || []).forEach(row => {
+        if (row?.cost_code) codes.add(row.cost_code);
+      });
+
+      Object.keys(costCodeNames || {}).forEach(code => {
+        if (code) codes.add(code);
+      });
+
+      (timeEntries || []).forEach(entry => {
+        const display = entry?.cost_code?.toString().trim();
+        if (display) codes.add(display);
+      });
+
+      return Array.from(codes);
+    }
+
+    function promptMergeCostCode(sourceCode) {
+      const normalizedSource = normalizeCostCodeClient(sourceCode, { applyMerges: false });
+      if (!normalizedSource) {
+        alert('Unable to merge: cost code is missing or invalid.');
+        return;
+      }
+
+      const options = getAllKnownCostCodes()
+        .filter(code => normalizeCostCodeClient(code, { applyMerges: false }) !== normalizedSource)
+        .sort();
+
+      const targetInput = prompt(
+        `Merge ${sourceCode} into which cost code?\nEnter a code from the table to combine hours. Leave blank to remove an existing merge.`,
+        manualCostCodeMerges[normalizedSource] || options[0] || ''
+      );
+
+      if (targetInput === null) return;
+
+      const trimmed = targetInput.toString().trim();
+      if (!trimmed) {
+        delete manualCostCodeMerges[normalizedSource];
+        persistCostCodeMerges();
+        renderBudgetSummary();
+        renderBudgetBreakdown();
+        renderAreaVarianceSummary();
+        return;
+      }
+
+      const normalizedTarget = normalizeCostCodeClient(trimmed, { applyMerges: false });
+      if (!normalizedTarget) {
+        alert('Please enter a valid cost code to merge into.');
+        return;
+      }
+
+      if (normalizedTarget === normalizedSource) {
+        delete manualCostCodeMerges[normalizedSource];
+      } else {
+        if (costCodeNames?.[normalizedSource] && !costCodeNames[normalizedTarget]) {
+          costCodeNames[normalizedTarget] = costCodeNames[normalizedSource];
+        }
+        manualCostCodeMerges[normalizedSource] = normalizedTarget;
+      }
+
+      persistCostCodeMerges();
+      renderBudgetSummary();
+      renderBudgetBreakdown();
+      renderAreaVarianceSummary();
+    }
+
     function renderBudgetBreakdown() {
       const container = document.getElementById('budgetBreakdown');
       if (!container) return;
@@ -1039,7 +1196,7 @@
         return;
       }
 
-      const rows = [...budgetComparison].sort((a, b) => a.cost_code.localeCompare(b.cost_code));
+      const rows = sortBudgetRows(buildBudgetChartRows(false));
 
       container.innerHTML = `
         <div style="overflow-x: auto;">
@@ -1071,15 +1228,77 @@
       `;
     }
 
-    function renderBudgetCharts() {
+    function buildBudgetChartRows(applyFilters = false) {
+      if (!budgetData || !budgetData.latest) return [];
+
+      const selectedBudgetClients = getSelectedCostCodeClients();
+      const shouldFilterBudgetCodes = applyFilters && selectedBudgetClients.size > 0;
+      const relevantEntries = applyFilters
+        ? filterBySelectedJobs(filterBySelectedCostCodes(timeEntries))
+        : timeEntries;
+      const actualTotals = {};
+      const budgetTotals = {};
+      const labelMap = {};
+
+      relevantEntries.forEach(entry => {
+        const normalized = normalizeCostCodeClient(entry.cost_code);
+        if (!normalized) return;
+        actualTotals[normalized] = (actualTotals[normalized] || 0) + (Number(entry.hours) || 0);
+        if (!labelMap[normalized]) {
+          labelMap[normalized] = entry.cost_code?.toString().trim() || normalized;
+        }
+      });
+
+      const budgetHours = budgetData.latest.cost_code_hours || {};
+      Object.entries(budgetHours).forEach(([rawCode, hours]) => {
+        const normalized = normalizeCostCodeClient(rawCode);
+        if (!normalized) return;
+        if (shouldFilterBudgetCodes && !selectedBudgetClients.has(normalized)) return;
+
+        budgetTotals[normalized] = (budgetTotals[normalized] || 0) + (Number(hours) || 0);
+        if (!labelMap[normalized]) {
+          labelMap[normalized] = rawCode.toString().trim() || normalized;
+        }
+      });
+
+      const allCodes = new Set([
+        ...Object.keys(budgetTotals),
+        ...Object.keys(actualTotals)
+      ]);
+
+      return Array.from(allCodes).map(code => {
+        const budget = Number(budgetTotals[code]) || 0;
+        const actual = Number(actualTotals[code]) || 0;
+        const variance = actual - budget;
+        const variancePercent = budget > 0 ? (variance / budget) * 100 : null;
+        const displayCode = labelMap[code] || code;
+
+        return {
+          cost_code: displayCode,
+          cost_code_name: getCostCodeName(code) || getCostCodeName(displayCode),
+          budget_hours: budget,
+          actual_hours: actual,
+          variance_hours: variance,
+          variance_percent: variancePercent
+        };
+      });
+    }
+
+    function renderBudgetCharts(rowsOverride = null) {
       const varianceCanvas = document.getElementById('budgetVarianceChart');
       const chartMode = document.getElementById('budgetChartMode')?.value || 'hours';
 
       if (budgetChart) budgetChart.destroy();
 
-      if (!budgetData || !budgetData.latest || !budgetComparison.length || !varianceCanvas) return;
+      const displayRows = Array.isArray(rowsOverride)
+        ? rowsOverride
+        : (lastBudgetVarianceRows.length
+            ? lastBudgetVarianceRows
+            : buildBudgetChartRows(document.getElementById('budgetApplyFiltersToggle')?.checked));
 
-      const sortedRows = sortBudgetRows(budgetComparison);
+      if (!budgetData || !budgetData.latest || !displayRows.length || !varianceCanvas) return;
+
+      const sortedRows = sortBudgetRows(displayRows);
       const labels = sortedRows.map(row => row.cost_code);
 
       const values = sortedRows.map(row => {
@@ -1244,11 +1463,159 @@
       `;
     }
 
+    function mergeAreaBreakdown(breakdownSource = {}) {
+      const merged = {};
+
+      Object.entries(breakdownSource).forEach(([areaKey, payload]) => {
+        const mergedEntries = {};
+        const entries = payload?.entries || [];
+
+        entries.forEach(entry => {
+          const normalized = normalizeCostCodeClient(entry.cost_code);
+          if (!normalized) return;
+
+          const displayCode = entry.cost_code?.toString().trim() || normalized;
+          if (!mergedEntries[normalized]) {
+            mergedEntries[normalized] = {
+              cost_code: displayCode,
+              cost_code_name: entry.cost_code_name || getCostCodeName(normalized),
+              actual_hours: 0,
+              budget_hours: 0
+            };
+          }
+
+          mergedEntries[normalized].actual_hours += Number(entry.actual_hours) || 0;
+          mergedEntries[normalized].budget_hours += Number(entry.budget_hours) || 0;
+        });
+
+        const entriesWithVariance = Object.values(mergedEntries).map(item => {
+          const budget = Number(item.budget_hours) || 0;
+          const actual = Number(item.actual_hours) || 0;
+          const variance = actual - budget;
+          const variancePercent = budget > 0 ? (variance / budget) * 100 : null;
+
+          return {
+            ...item,
+            variance_hours: variance,
+            variance_percent: variancePercent
+          };
+        });
+
+        merged[areaKey] = { entries: entriesWithVariance };
+      });
+
+      return merged;
+    }
+
+    function buildAreaVarianceData(applyFilters = false) {
+      const rows = Array.isArray(areaData?.comparison) ? [...areaData.comparison] : [];
+      const breakdownSource = areaData?.costCodeBreakdown || {};
+      const mergedBreakdown = mergeAreaBreakdown(breakdownSource);
+
+      const budgetByAreaKey = rows.reduce((map, row) => {
+        map.set(row.key, Number(row.budget_hours) || 0);
+        return map;
+      }, new Map());
+
+      const recomputedRows = rows.map(row => {
+        const mergedEntries = mergedBreakdown?.[row.key]?.entries || [];
+        const targetBudget = budgetByAreaKey.get(row.key) ?? 0;
+        const breakdownBudget = mergedEntries.reduce((sum, entry) => sum + (Number(entry.budget_hours) || 0), 0);
+        const budgetScale = breakdownBudget > 0 && targetBudget > 0 ? targetBudget / breakdownBudget : 1;
+
+        const scaledEntries = mergedEntries.map(entry => {
+          const budgetHours = (Number(entry.budget_hours) || 0) * budgetScale;
+          const actualHours = Number(entry.actual_hours) || 0;
+          const varianceHours = actualHours - budgetHours;
+          const variancePercent = budgetHours > 0 ? (varianceHours / budgetHours) * 100 : null;
+
+          return {
+            ...entry,
+            budget_hours: budgetHours,
+            actual_hours: actualHours,
+            variance_hours: varianceHours,
+            variance_percent: variancePercent
+          };
+        });
+
+        const actualHours = scaledEntries.reduce((sum, entry) => sum + (Number(entry.actual_hours) || 0), 0);
+        const budgetHours = scaledEntries.reduce((sum, entry) => sum + (Number(entry.budget_hours) || 0), 0);
+        const varianceHours = actualHours - budgetHours;
+        const variancePercent = budgetHours > 0 ? (varianceHours / budgetHours) * 100 : null;
+
+        mergedBreakdown[row.key] = { entries: scaledEntries };
+
+        return {
+          ...row,
+          actual_hours: actualHours,
+          budget_hours: budgetHours,
+          variance_hours: varianceHours,
+          variance_percent: variancePercent
+        };
+      });
+
+      if (!applyFilters) {
+        return { rows: recomputedRows, breakdownMap: mergedBreakdown };
+      }
+
+      const filteredRows = [];
+      const filteredBreakdown = {};
+
+      recomputedRows.forEach(row => {
+        const normalizedKey = normalizeJobLabel(row.key);
+        const normalizedArea = normalizeJobLabel(row.area);
+        const hasJobFilter = selectedJobs.size > 0;
+        const matchesJobSelection = !hasJobFilter
+          || selectedJobs.has(normalizedKey)
+          || selectedJobs.has(normalizedArea);
+
+        if (!matchesJobSelection) return;
+
+        const sourceBreakdown = mergedBreakdown?.[row.key]?.entries || [];
+        const entries = sourceBreakdown
+          .filter(entry => isCostCodeSelected(entry.cost_code))
+          .map(entry => {
+            const budget = Number(entry.budget_hours) || 0;
+            const actual = Number(entry.actual_hours) || 0;
+            const variance = actual - budget;
+            const variancePercent = budget > 0 ? (variance / budget) * 100 : null;
+
+            return {
+              ...entry,
+              variance_hours: variance,
+              variance_percent: variancePercent
+            };
+          });
+
+        const actualHours = entries.reduce((sum, entry) => sum + (Number(entry.actual_hours) || 0), 0);
+        const budgetHours = entries.reduce((sum, entry) => sum + (Number(entry.budget_hours) || 0), 0);
+        const varianceHours = actualHours - budgetHours;
+        const variancePercent = budgetHours > 0 ? (varianceHours / budgetHours) * 100 : null;
+
+        filteredBreakdown[row.key] = { entries, totalActual: actualHours, totalBudget: budgetHours };
+        filteredRows.push({
+          ...row,
+          actual_hours: actualHours,
+          budget_hours: budgetHours,
+          variance_hours: varianceHours,
+          variance_percent: variancePercent
+        });
+      });
+
+      return { rows: filteredRows, breakdownMap: filteredBreakdown };
+    }
+
+    function handleAreaApplyFiltersToggle(event) {
+      areaApplyFiltersEnabled = event?.target?.checked ?? false;
+      renderAreaVarianceSummary();
+    }
+
     function renderAreaVarianceSummary() {
       const container = document.getElementById('areaVarianceSummary');
       const currentMode = document.getElementById('areaVarianceChartMode')?.value || 'hours';
       const viewMode = document.getElementById('areaVarianceViewMode')?.value || 'area';
       const stackBars = document.getElementById('areaVarianceStackToggle')?.checked ?? true;
+      const applyFilters = areaApplyFiltersEnabled;
       if (!container) return;
 
       if (!areaData || !Array.isArray(areaData.comparison) || areaData.comparison.length === 0) {
@@ -1260,7 +1627,19 @@
         return;
       }
 
-      const rows = sortAreaRows(areaData.comparison);
+      const { rows, breakdownMap } = buildAreaVarianceData(applyFilters);
+      areaBreakdownView = breakdownMap;
+
+      if (!rows.length) {
+        container.innerHTML = '<p style="color: var(--text-secondary);">No matching areas for the current filters.</p>';
+        if (areaVarianceChart) {
+          areaVarianceChart.destroy();
+          areaVarianceChart = null;
+        }
+        return;
+      }
+
+      const sortedRows = sortAreaRows(rows);
 
       container.innerHTML = `
         <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 0.5rem; gap: 1rem; flex-wrap: wrap;">
@@ -1269,6 +1648,9 @@
             <span style="color: var(--text-secondary); font-size: 0.9rem;">From budget import areas</span>
           </div>
           <div style="display: inline-flex; gap: 0.5rem; align-items: center; flex-wrap: wrap; justify-content: flex-end;">
+            <label style="display: inline-flex; align-items: center; gap: 0.35rem; font-size: 0.9rem; color: var(--text-secondary);">
+              <input type="checkbox" id="areaApplyFiltersToggle" ${applyFilters ? 'checked' : ''} onchange="handleAreaApplyFiltersToggle(event)"> Apply monthly hours filters
+            </label>
             <label for="areaVarianceChartMode" style="font-size: 0.9rem; color: var(--text-secondary);">Display</label>
             <select id="areaVarianceChartMode" onchange="renderAreaVarianceSummary()">
               <option value="hours" ${currentMode === 'hours' ? 'selected' : ''}>Variance (hours)</option>
@@ -1316,8 +1698,8 @@
               </tr>
             </thead>
             <tbody>
-              ${rows.map(row => {
-                const breakdown = areaData.costCodeBreakdown?.[row.key]?.entries || [];
+              ${sortedRows.map(row => {
+                const breakdown = breakdownMap?.[row.key]?.entries || [];
                 const hasBreakdown = breakdown.length > 0;
                 return `
                   <tr style="border-bottom: 1px solid var(--border-color);">
@@ -1347,7 +1729,16 @@
         </div>
       `;
 
-      renderAreaVarianceChart(rows, currentMode, viewMode, stackBars);
+      const toggles = container.querySelectorAll('#areaApplyFiltersToggle');
+      if (toggles.length > 1) {
+        toggles.forEach((toggle, index) => {
+          if (index > 0) {
+            toggle.closest('label')?.remove();
+          }
+        });
+      }
+
+      renderAreaVarianceChart(sortedRows, currentMode, viewMode, stackBars, breakdownMap);
     }
 
     function changeAreaSort(column) {
@@ -1402,7 +1793,8 @@
     }
 
     function renderCostCodeBreakdown(row) {
-      const breakdown = areaData.costCodeBreakdown?.[row.key];
+      const breakdownSource = areaBreakdownView || areaData.costCodeBreakdown || {};
+      const breakdown = breakdownSource?.[row.key];
       if (!breakdown || !Array.isArray(breakdown.entries) || breakdown.entries.length === 0) {
         return '<div class="empty-breakdown">No cost code detail for this area yet.</div>';
       }
@@ -1440,7 +1832,7 @@
       `;
     }
 
-    function renderAreaVarianceChart(rows = [], mode = 'hours', viewMode = 'area', stackBars = true) {
+    function renderAreaVarianceChart(rows = [], mode = 'hours', viewMode = 'area', stackBars = true, breakdownMap = {}) {
       const canvas = document.getElementById('areaVarianceChart');
 
       if (areaVarianceChart) {
@@ -1455,8 +1847,6 @@
       const labels = rows.map(row => row.area);
       const yLabel = mode === 'percent' ? 'Percent' : 'Hours';
       const dataLabel = mode === 'percent' ? 'Variance (%)' : 'Variance (hrs)';
-
-      const breakdownMap = areaData.costCodeBreakdown || {};
 
       const costCodes = viewMode === 'costCode'
         ? Array.from(new Set(rows.flatMap(row => (breakdownMap[row.key]?.entries || []).map(entry => entry.cost_code)))).sort()
@@ -1516,7 +1906,7 @@
           responsive: true,
           maintainAspectRatio: false,
           plugins: {
-            legend: { display: viewMode === 'costCode' },
+            legend: { display: false },
             tooltip: {
               callbacks: {
                 label: (context) => {
@@ -2231,12 +2621,21 @@
       document.getElementById(tabName + 'Tab').classList.add('active');
     }
 
-    // Normalize cost codes to numeric-only strings (drops decimals)
-    function normalizeCostCodeClient(code) {
+    // Normalize cost codes to numeric-only strings (drops decimals and separators) and collapses extra trailing zeros.
+    function normalizeCostCodeClient(code, { applyMerges = true } = {}) {
       if (code === undefined || code === null) return null;
       const [mainPart] = code.toString().split('.');
-      const numeric = mainPart.replace(/\D/g, '').trim();
-      return numeric || null;
+      let numeric = mainPart.replace(/\D/g, '').replace(/^0+/, '').trim();
+      if (!numeric) return null;
+
+      while (numeric.length > 4 && numeric.endsWith('0')) {
+        numeric = numeric.slice(0, -1);
+      }
+
+      if (!numeric) return null;
+
+      const normalized = numeric;
+      return applyMerges ? applyCostCodeMerge(normalized) : normalized;
     }
 
     function getCostCodeName(code) {
