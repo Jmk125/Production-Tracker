@@ -166,9 +166,6 @@
               <option value="hours">Variance (hours)</option>
               <option value="percent">Variance (%)</option>
             </select>
-            <label style="display: inline-flex; align-items: center; gap: 0.35rem; font-size: 0.9rem; color: var(--text-secondary);">
-              <input type="checkbox" id="budgetApplyFiltersToggle" onchange="renderBudgetCharts()"> Apply monthly hours filters
-            </label>
           </div>
         </div>
         <div class="chart-container" style="min-height: 420px;">
@@ -1676,9 +1673,6 @@
             <label style="display: inline-flex; align-items: center; gap: 0.35rem; font-size: 0.9rem; color: var(--text-secondary);">
               <input type="checkbox" id="areaVarianceStackToggle" ${stackBars ? 'checked' : ''} onchange="renderAreaVarianceSummary()"> Stack bars
             </label>
-              <label style="display: inline-flex; align-items: center; gap: 0.35rem; font-size: 0.9rem; color: var(--text-secondary);">
-                <input type="checkbox" id="areaVarianceApplyFiltersToggle" ${applyFilters ? 'checked' : ''} onchange="renderAreaVarianceSummary()"> Apply monthly hours filters
-              </label>
           </div>
         </div>
         <div style="overflow-x: auto;">
