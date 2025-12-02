@@ -324,6 +324,7 @@
     let hoursChart = null;
     let payClassChart = null;
     let budgetChart = null;
+    let lastBudgetVarianceRows = [];
     let areaVarianceChart = null;
     let employeeChart = null;
 
@@ -405,7 +406,6 @@
         renderBudgetSummary();
         renderBudgetUploads(budgetData.uploads || []);
         renderBudgetBreakdown();
-        renderBudgetCharts();
         renderAreaSection();
       } catch (error) {
         console.error('Error loading budget data:', error);
@@ -957,6 +957,7 @@
 
       const applyFilters = document.getElementById('budgetApplyFiltersToggle')?.checked ?? false;
       const varianceRows = buildBudgetChartRows(applyFilters);
+      lastBudgetVarianceRows = varianceRows;
 
       const totalBudgetHours = varianceRows.reduce((sum, row) => sum + (Number(row.budget_hours) || 0), 0);
       const totalActualHours = varianceRows.reduce((sum, row) => sum + (Number(row.actual_hours) || 0), 0);
@@ -1029,6 +1030,13 @@
           ` : '<p style="color: var(--text-secondary);">No budget variance to display yet.</p>'}
         </div>
       `;
+
+      renderBudgetCharts(varianceRows);
+    }
+
+    function handleBudgetFiltersToggle() {
+      renderBudgetSummary();
+      renderAreaVarianceSummary();
     }
 
     function handleBudgetFiltersToggle() {
@@ -1045,7 +1053,6 @@
       }
 
       renderBudgetSummary();
-      renderBudgetCharts();
     }
 
     function renderSortIndicator(column) {
@@ -1124,6 +1131,7 @@
       if (!applyFilters) return budgetComparison;
 
       const selectedBudgetClients = getSelectedCostCodeClients();
+      const shouldFilterBudgetCodes = selectedBudgetClients.size > 0;
       const filteredEntries = filterBySelectedJobs(filterBySelectedCostCodes(timeEntries));
       const actualTotals = {};
       const budgetTotals = {};
@@ -1137,7 +1145,8 @@
       const budgetHours = budgetData.latest.cost_code_hours || {};
       Object.entries(budgetHours).forEach(([rawCode, hours]) => {
         const normalized = normalizeCostCodeClient(rawCode);
-        if (!normalized || !selectedBudgetClients.has(normalized)) return;
+        if (!normalized) return;
+        if (shouldFilterBudgetCodes && !selectedBudgetClients.has(normalized)) return;
 
         budgetTotals[normalized] = (budgetTotals[normalized] || 0) + (Number(hours) || 0);
         if (!labelMap[normalized]) {
@@ -1168,14 +1177,18 @@
       });
     }
 
-    function renderBudgetCharts() {
+    function renderBudgetCharts(rowsOverride = null) {
       const varianceCanvas = document.getElementById('budgetVarianceChart');
       const chartMode = document.getElementById('budgetChartMode')?.value || 'hours';
       const applyFilters = document.getElementById('budgetApplyFiltersToggle')?.checked;
 
       if (budgetChart) budgetChart.destroy();
 
-      const displayRows = buildBudgetChartRows(applyFilters);
+      const displayRows = Array.isArray(rowsOverride)
+        ? rowsOverride
+        : (lastBudgetVarianceRows.length
+            ? lastBudgetVarianceRows
+            : buildBudgetChartRows(document.getElementById('budgetApplyFiltersToggle')?.checked));
 
       if (!budgetData || !budgetData.latest || !displayRows.length || !varianceCanvas) return;
 
@@ -1391,7 +1404,7 @@
       const currentMode = document.getElementById('areaVarianceChartMode')?.value || 'hours';
       const viewMode = document.getElementById('areaVarianceViewMode')?.value || 'area';
       const stackBars = document.getElementById('areaVarianceStackToggle')?.checked ?? true;
-      const applyFilters = document.getElementById('areaVarianceApplyFiltersToggle')?.checked ?? false;
+      const applyFilters = document.getElementById('budgetApplyFiltersToggle')?.checked ?? false;
       if (!container) return;
 
       if (!areaData || !Array.isArray(areaData.comparison) || areaData.comparison.length === 0) {
