@@ -1566,46 +1566,6 @@
       const filteredBreakdown = {};
       const hasJobFilter = selectedJobs.size > 0;
 
-      const budgetTotals = {};
-      const selectedBudgetClients = getSelectedCostCodeClients();
-
-      Object.entries(budgetData?.latest?.cost_code_hours || {}).forEach(([rawCode, hours]) => {
-        const normalized = normalizeCostCodeClient(rawCode);
-        if (!normalized) return;
-        if (selectedBudgetClients.size > 0 && !selectedBudgetClients.has(normalized)) return;
-
-        budgetTotals[normalized] = (budgetTotals[normalized] || 0) + (Number(hours) || 0);
-      });
-
-      const allowedAreas = new Set();
-      recomputedRows.forEach(row => {
-        const normalizedKey = normalizeJobLabel(row.key);
-        const normalizedArea = normalizeJobLabel(row.area);
-        const matchesJobSelection = !hasJobFilter
-          || selectedJobs.has(normalizedKey)
-          || selectedJobs.has(normalizedArea);
-
-        if (matchesJobSelection) {
-          allowedAreas.add(row.key);
-        }
-      });
-
-      const budgetDistribution = {};
-      Object.entries(mergedBreakdown || {}).forEach(([areaKey, breakdown]) => {
-        if (!allowedAreas.has(areaKey)) return;
-
-        (breakdown?.entries || []).forEach(entry => {
-          const normalizedCode = normalizeCostCodeClient(entry.cost_code);
-          if (!normalizedCode) return;
-          if (selectedBudgetClients.size > 0 && !selectedBudgetClients.has(normalizedCode)) return;
-
-          const actualHours = Number(entry.actual_hours) || 0;
-          budgetDistribution[normalizedCode] = budgetDistribution[normalizedCode] || { total: 0, areas: {} };
-          budgetDistribution[normalizedCode].total += actualHours;
-          budgetDistribution[normalizedCode].areas[areaKey] = (budgetDistribution[normalizedCode].areas[areaKey] || 0) + actualHours;
-        });
-      });
-
       recomputedRows.forEach(row => {
         const normalizedKey = normalizeJobLabel(row.key);
         const normalizedArea = normalizeJobLabel(row.area);
