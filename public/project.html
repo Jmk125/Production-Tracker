@@ -1126,6 +1126,8 @@
       const selectedBudgetClients = getSelectedCostCodeClients();
       const filteredEntries = filterBySelectedJobs(filterBySelectedCostCodes(timeEntries));
       const actualTotals = {};
+      const budgetTotals = {};
+      const labelMap = {};
 
       filteredEntries.forEach(entry => {
         const code = normalizeCostCodeClient(entry.cost_code) || 'Unknown';
@@ -1133,27 +1135,31 @@
       });
 
       const budgetHours = budgetData.latest.cost_code_hours || {};
-      const selectedBudgetCodes = new Set(
-        Object.keys(budgetHours).filter(code => {
-          const normalized = normalizeCostCodeClient(code);
-          return normalized && selectedBudgetClients.has(normalized);
-        })
-      );
+      Object.entries(budgetHours).forEach(([rawCode, hours]) => {
+        const normalized = normalizeCostCodeClient(rawCode);
+        if (!normalized || !selectedBudgetClients.has(normalized)) return;
+
+        budgetTotals[normalized] = (budgetTotals[normalized] || 0) + (Number(hours) || 0);
+        if (!labelMap[normalized]) {
+          labelMap[normalized] = rawCode.toString().trim() || normalized;
+        }
+      });
 
       const allCodes = new Set([
-        ...selectedBudgetCodes,
+        ...Object.keys(budgetTotals),
         ...Object.keys(actualTotals)
       ]);
 
       return Array.from(allCodes).map(code => {
-        const budget = Number(budgetHours[code]) || 0;
+        const budget = Number(budgetTotals[code]) || 0;
         const actual = Number(actualTotals[code]) || 0;
         const variance = actual - budget;
         const variancePercent = budget > 0 ? (variance / budget) * 100 : null;
+        const displayCode = labelMap[code] || code;
 
         return {
-          cost_code: code,
-          cost_code_name: getCostCodeName(code),
+          cost_code: displayCode,
+          cost_code_name: getCostCodeName(code) || getCostCodeName(displayCode),
           budget_hours: budget,
           actual_hours: actual,
           variance_hours: variance,
@@ -2382,12 +2388,17 @@
       document.getElementById(tabName + 'Tab').classList.add('active');
     }
 
-    // Normalize cost codes to numeric-only strings (drops decimals)
+    // Normalize cost codes to numeric-only strings (drops decimals and leading zeros)
     function normalizeCostCodeClient(code) {
       if (code === undefined || code === null) return null;
       const [mainPart] = code.toString().split('.');
       const numeric = mainPart.replace(/\D/g, '').trim();
-      return numeric || null;
+      if (!numeric) return null;
+
+      const asNumber = parseInt(numeric, 10);
+      if (Number.isNaN(asNumber)) return null;
+
+      return asNumber.toString();
     }
 
     function getCostCodeName(code) {
