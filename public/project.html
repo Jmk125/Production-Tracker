@@ -1579,7 +1579,14 @@
         const entries = sourceBreakdown
           .filter(entry => isCostCodeSelected(entry.cost_code))
           .map(entry => {
-            const budget = Number(entry.budget_hours) || 0;
+            const normalizedCode = normalizeCostCodeClient(entry.cost_code);
+            const budgetBase = normalizedCode && budgetTotals.hasOwnProperty(normalizedCode)
+              ? budgetDistribution[normalizedCode]
+              : null;
+            const areaActual = budgetBase?.areas?.[row.key] || 0;
+            const budget = budgetBase && budgetBase.total > 0
+              ? (budgetTotals[normalizedCode] * (areaActual / budgetBase.total))
+              : Number(entry.budget_hours) || 0;
             const actual = Number(entry.actual_hours) || 0;
             const variance = actual - budget;
             const variancePercent = budget > 0 ? (variance / budget) * 100 : null;
