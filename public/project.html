@@ -2502,12 +2502,23 @@
       resultDiv.innerHTML = '';
 
       try {
-        const { costCodeHours, areaHours, costCodeNames: parsedCostCodeNames } = await parseBudgetFile(file);
+        const {
+          costCodeHours,
+          areaHours,
+          areaCostCodeHours,
+          costCodeNames: parsedCostCodeNames
+        } = await parseBudgetFile(file);
 
         const response = await fetch(`/api/projects/${projectId}/budget`, {
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({ filename: file.name, costCodeHours, areaHours, costCodeNames: parsedCostCodeNames })
+          body: JSON.stringify({
+            filename: file.name,
+            costCodeHours,
+            areaHours,
+            areaCostCodeHours,
+            costCodeNames: parsedCostCodeNames
+          })
         });
 
         const result = await response.json();
@@ -2576,6 +2587,7 @@
 
       const totals = {};
       const areaTotals = {};
+      const areaCostCodeHours = {};
       const costCodeNames = {};
       let rowsProcessed = 0;
       let currentArea = null;
@@ -2645,6 +2657,11 @@
 
         if (currentArea) {
           areaTotals[currentArea] = (areaTotals[currentArea] || 0) + hours;
+          if (!areaCostCodeHours[currentArea]) {
+            areaCostCodeHours[currentArea] = {};
+          }
+          areaCostCodeHours[currentArea][normalizedCode] =
+            (areaCostCodeHours[currentArea][normalizedCode] || 0) + hours;
         }
 
         rowsProcessed++;
@@ -2657,7 +2674,7 @@
       console.log(
         `Successfully parsed ${Object.keys(totals).length} unique cost codes from ${rowsProcessed} rows in sheet "${sheetName}"`
       );
-      return { costCodeHours: totals, areaHours: areaTotals, costCodeNames };
+      return { costCodeHours: totals, areaHours: areaTotals, areaCostCodeHours, costCodeNames };
     }
 
     function switchTab(evt, tabName) {
