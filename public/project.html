@@ -1658,7 +1658,7 @@
           </div>
           <div style="display: inline-flex; gap: 0.5rem; align-items: center; flex-wrap: wrap; justify-content: flex-end;">
             <label style="display: inline-flex; align-items: center; gap: 0.35rem; font-size: 0.9rem; color: var(--text-secondary);">
-              <input type="checkbox" id="areaApplyFiltersToggle" ${applyFilters ? 'checked' : ''} onchange="handleAreaApplyFiltersToggle(event)"> Apply monthly hours filters
+              <input type="checkbox" id="areaApplyFiltersToggle" ${applyFilters ? 'checked' : ''}> Apply monthly hours filters
             </label>
             <label for="areaVarianceChartMode" style="font-size: 0.9rem; color: var(--text-secondary);">Display</label>
             <select id="areaVarianceChartMode" onchange="renderAreaVarianceSummary()">
@@ -1738,13 +1738,10 @@
         </div>
       `;
 
-      const toggles = container.querySelectorAll('#areaApplyFiltersToggle');
-      if (toggles.length > 1) {
-        toggles.forEach((toggle, index) => {
-          if (index > 0) {
-            toggle.closest('label')?.remove();
-          }
-        });
+      const filterToggle = container.querySelector('#areaApplyFiltersToggle');
+      if (filterToggle) {
+        filterToggle.checked = applyFilters;
+        filterToggle.addEventListener('change', handleAreaApplyFiltersToggle);
       }
 
       renderAreaVarianceChart(sortedRows, currentMode, viewMode, stackBars, breakdownMap);
