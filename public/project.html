@@ -317,6 +317,7 @@
     let budgetData = null;
     let budgetComparison = [];
     let costCodeNames = {};
+    let manualCostCodeMerges = {};
     let areaData = { comparison: [], budgetAreas: [], actualAreas: [], mappings: {}, adjustments: { budget: {}, actual: {} } };
     let areaBreakdownView = {};
     let budgetSort = { column: 'variance_hours', direction: 'desc' };
@@ -329,6 +330,7 @@
     let employeeChart = null;
 
     document.addEventListener('DOMContentLoaded', async () => {
+      loadCostCodeMerges();
       await loadProject();
       await loadTimeEntries();
       await loadDetailedStats();
@@ -358,6 +360,38 @@
       } catch (error) {
         console.error('Error loading project:', error);
       }
+    }
+
+    function loadCostCodeMerges() {
+      try {
+        const raw = localStorage.getItem(`manualCostCodeMerges_${projectId}`);
+        manualCostCodeMerges = raw ? JSON.parse(raw) : {};
+      } catch (error) {
+        console.warn('Unable to load cost code merges', error);
+        manualCostCodeMerges = {};
+      }
+    }
+
+    function persistCostCodeMerges() {
+      try {
+        localStorage.setItem(`manualCostCodeMerges_${projectId}`, JSON.stringify(manualCostCodeMerges));
+      } catch (error) {
+        console.warn('Unable to save cost code merges', error);
+      }
+    }
+
+    function applyCostCodeMerge(code) {
+      if (!code) return code;
+
+      let current = code;
+      const seen = new Set();
+
+      while (manualCostCodeMerges[current] && !seen.has(current)) {
+        seen.add(current);
+        current = manualCostCodeMerges[current];
+      }
+
+      return current;
     }
 
     async function loadTimeEntries() {
@@ -1011,6 +1045,7 @@
                         % Variance ${renderSortIndicator('variance_percent')}
                       </button>
                     </th>
+                    <th style="text-align: right; padding: 0.5rem;">Merge</th>
                   </tr>
                 </thead>
                 <tbody>
@@ -1022,6 +1057,11 @@
                       <td style="padding: 0.5rem; text-align: right;">${formatHours(row.actual_hours)}</td>
                       <td style="padding: 0.5rem; text-align: right;">${formatVarianceBadge(row.variance_hours)}</td>
                       <td style="padding: 0.5rem; text-align: right;">${formatPercentVariance(row.variance_percent)}</td>
+                      <td style="padding: 0.5rem; text-align: right;">
+                        <button type="button" class="secondary-button" style="padding: 0.25rem 0.6rem; font-size: 0.813rem;" onclick="promptMergeCostCode('${escapeHtml(row.cost_code)}')">
+                          Merge
+                        </button>
+                      </td>
                     </tr>
                   `).join('')}
                 </tbody>
@@ -1036,12 +1076,6 @@
 
     function handleBudgetFiltersToggle() {
       renderBudgetSummary();
-      renderAreaVarianceSummary();
-    }
-
-    function handleBudgetFiltersToggle() {
-      renderBudgetSummary();
-      renderBudgetCharts();
       renderAreaVarianceSummary();
     }
 
@@ -1084,6 +1118,78 @@
       });
     }
 
+    function getAllKnownCostCodes() {
+      const codes = new Set();
+
+      (lastBudgetVarianceRows || []).forEach(row => {
+        if (row?.cost_code) codes.add(row.cost_code);
+      });
+
+      (budgetComparison || []).forEach(row => {
+        if (row?.cost_code) codes.add(row.cost_code);
+      });
+
+      Object.keys(costCodeNames || {}).forEach(code => {
+        if (code) codes.add(code);
+      });
+
+      (timeEntries || []).forEach(entry => {
+        const display = entry?.cost_code?.toString().trim();
+        if (display) codes.add(display);
+      });
+
+      return Array.from(codes);
+    }
+
+    function promptMergeCostCode(sourceCode) {
+      const normalizedSource = normalizeCostCodeClient(sourceCode, { applyMerges: false });
+      if (!normalizedSource) {
+        alert('Unable to merge: cost code is missing or invalid.');
+        return;
+      }
+
+      const options = getAllKnownCostCodes()
+        .filter(code => normalizeCostCodeClient(code, { applyMerges: false }) !== normalizedSource)
+        .sort();
+
+      const targetInput = prompt(
+        `Merge ${sourceCode} into which cost code?\nEnter a code from the table to combine hours. Leave blank to remove an existing merge.`,
+        manualCostCodeMerges[normalizedSource] || options[0] || ''
+      );
+
+      if (targetInput === null) return;
+
+      const trimmed = targetInput.toString().trim();
+      if (!trimmed) {
+        delete manualCostCodeMerges[normalizedSource];
+        persistCostCodeMerges();
+        renderBudgetSummary();
+        renderBudgetBreakdown();
+        renderAreaVarianceSummary();
+        return;
+      }
+
+      const normalizedTarget = normalizeCostCodeClient(trimmed, { applyMerges: false });
+      if (!normalizedTarget) {
+        alert('Please enter a valid cost code to merge into.');
+        return;
+      }
+
+      if (normalizedTarget === normalizedSource) {
+        delete manualCostCodeMerges[normalizedSource];
+      } else {
+        if (costCodeNames?.[normalizedSource] && !costCodeNames[normalizedTarget]) {
+          costCodeNames[normalizedTarget] = costCodeNames[normalizedSource];
+        }
+        manualCostCodeMerges[normalizedSource] = normalizedTarget;
+      }
+
+      persistCostCodeMerges();
+      renderBudgetSummary();
+      renderBudgetBreakdown();
+      renderAreaVarianceSummary();
+    }
+
     function renderBudgetBreakdown() {
       const container = document.getElementById('budgetBreakdown');
       if (!container) return;
@@ -1093,7 +1199,7 @@
         return;
       }
 
-      const rows = [...budgetComparison].sort((a, b) => a.cost_code.localeCompare(b.cost_code));
+      const rows = sortBudgetRows(buildBudgetChartRows(false));
 
       container.innerHTML = `
         <div style="overflow-x: auto;">
@@ -1128,18 +1234,22 @@
     function buildBudgetChartRows(applyFilters = false) {
       if (!budgetData || !budgetData.latest) return [];
 
-      if (!applyFilters) return budgetComparison;
-
       const selectedBudgetClients = getSelectedCostCodeClients();
-      const shouldFilterBudgetCodes = selectedBudgetClients.size > 0;
-      const filteredEntries = filterBySelectedJobs(filterBySelectedCostCodes(timeEntries));
+      const shouldFilterBudgetCodes = applyFilters && selectedBudgetClients.size > 0;
+      const relevantEntries = applyFilters
+        ? filterBySelectedJobs(filterBySelectedCostCodes(timeEntries))
+        : timeEntries;
       const actualTotals = {};
       const budgetTotals = {};
       const labelMap = {};
 
-      filteredEntries.forEach(entry => {
-        const code = normalizeCostCodeClient(entry.cost_code) || 'Unknown';
-        actualTotals[code] = (actualTotals[code] || 0) + (Number(entry.hours) || 0);
+      relevantEntries.forEach(entry => {
+        const normalized = normalizeCostCodeClient(entry.cost_code);
+        if (!normalized) return;
+        actualTotals[normalized] = (actualTotals[normalized] || 0) + (Number(entry.hours) || 0);
+        if (!labelMap[normalized]) {
+          labelMap[normalized] = entry.cost_code?.toString().trim() || normalized;
+        }
       });
 
       const budgetHours = budgetData.latest.cost_code_hours || {};
@@ -1357,18 +1467,66 @@
       `;
     }
 
+    function mergeAreaBreakdown(breakdownSource = {}) {
+      const merged = {};
+
+      Object.entries(breakdownSource).forEach(([areaKey, payload]) => {
+        const mergedEntries = {};
+        const entries = payload?.entries || [];
+
+        entries.forEach(entry => {
+          const normalized = normalizeCostCodeClient(entry.cost_code);
+          if (!normalized) return;
+
+          const displayCode = entry.cost_code?.toString().trim() || normalized;
+          if (!mergedEntries[normalized]) {
+            mergedEntries[normalized] = {
+              cost_code: displayCode,
+              cost_code_name: entry.cost_code_name || getCostCodeName(normalized),
+              actual_hours: 0,
+              budget_hours: 0
+            };
+          }
+
+          mergedEntries[normalized].actual_hours += Number(entry.actual_hours) || 0;
+          mergedEntries[normalized].budget_hours += Number(entry.budget_hours) || 0;
+        });
+
+        merged[areaKey] = { entries: Object.values(mergedEntries) };
+      });
+
+      return merged;
+    }
+
     function buildAreaVarianceData(applyFilters = false) {
       const rows = Array.isArray(areaData?.comparison) ? [...areaData.comparison] : [];
       const breakdownSource = areaData?.costCodeBreakdown || {};
+      const mergedBreakdown = mergeAreaBreakdown(breakdownSource);
+
+      const recomputedRows = rows.map(row => {
+        const mergedEntries = mergedBreakdown?.[row.key]?.entries || [];
+        const actualHours = mergedEntries.reduce((sum, entry) => sum + (Number(entry.actual_hours) || 0), 0);
+        const budgetHours = mergedEntries.reduce((sum, entry) => sum + (Number(entry.budget_hours) || 0), 0);
+        const varianceHours = actualHours - budgetHours;
+        const variancePercent = budgetHours > 0 ? (varianceHours / budgetHours) * 100 : null;
+
+        return {
+          ...row,
+          actual_hours: actualHours,
+          budget_hours: budgetHours,
+          variance_hours: varianceHours,
+          variance_percent: variancePercent
+        };
+      });
 
       if (!applyFilters) {
-        return { rows, breakdownMap: breakdownSource };
+        return { rows: recomputedRows, breakdownMap: mergedBreakdown };
       }
 
       const filteredRows = [];
       const filteredBreakdown = {};
 
-      rows.forEach(row => {
+      recomputedRows.forEach(row => {
         const normalizedKey = normalizeJobLabel(row.key);
         const normalizedArea = normalizeJobLabel(row.area);
         const hasJobFilter = selectedJobs.size > 0;
@@ -1378,7 +1536,7 @@
 
         if (!matchesJobSelection) return;
 
-        const sourceBreakdown = breakdownSource?.[row.key]?.entries || [];
+        const sourceBreakdown = mergedBreakdown?.[row.key]?.entries || [];
         const entries = sourceBreakdown.filter(entry => isCostCodeSelected(entry.cost_code));
 
         const actualHours = entries.reduce((sum, entry) => sum + (Number(entry.actual_hours) || 0), 0);
@@ -2401,17 +2559,21 @@
       document.getElementById(tabName + 'Tab').classList.add('active');
     }
 
-    // Normalize cost codes to numeric-only strings (drops decimals and leading zeros)
-    function normalizeCostCodeClient(code) {
+    // Normalize cost codes to numeric-only strings (drops decimals and separators) and collapses extra trailing zeros.
+    function normalizeCostCodeClient(code, { applyMerges = true } = {}) {
       if (code === undefined || code === null) return null;
       const [mainPart] = code.toString().split('.');
-      const numeric = mainPart.replace(/\D/g, '').trim();
+      let numeric = mainPart.replace(/\D/g, '').replace(/^0+/, '').trim();
       if (!numeric) return null;
 
-      const asNumber = parseInt(numeric, 10);
-      if (Number.isNaN(asNumber)) return null;
+      while (numeric.length > 4 && numeric.endsWith('0')) {
+        numeric = numeric.slice(0, -1);
+      }
 
-      return asNumber.toString();
+      if (!numeric) return null;
+
+      const normalized = numeric;
+      return applyMerges ? applyCostCodeMerge(normalized) : normalized;
     }
 
     function getCostCodeName(code) {
