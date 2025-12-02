@@ -126,6 +126,7 @@ async function buildAreaComparison(projectId, latestBudget = null) {
   ]);
 
   const budgetAreasRaw = latestBudgetUpload?.area_hours || {};
+  const budgetCostCodeAreas = latestBudgetUpload?.area_cost_code_hours || {};
   const budgetAreas = Object.entries(budgetAreasRaw).map(([label, hours]) => ({
     key: normalizeJobLabel(label),
     label,
@@ -135,27 +136,45 @@ async function buildAreaComparison(projectId, latestBudget = null) {
   const actualTotals = jobTotals.totals || {};
   const actualLabels = jobTotals.labels || {};
 
-  const aggregatedCostCodes = {};
+  const actualCostCodesAggregated = {};
+  const budgetCostCodesAggregated = {};
+  const mappings = areaConfig.mappings || {};
+  const adjustments = areaConfig.adjustments || { budget: {}, actual: {} };
 
   Object.entries(jobCostCodes || {}).forEach(([key, data]) => {
     const normalized = normalizeJobLabel(key);
     if (!normalized) return;
 
-    aggregatedCostCodes[normalized] = aggregatedCostCodes[normalized] || { costCodes: {}, total: 0 };
+    actualCostCodesAggregated[normalized] = actualCostCodesAggregated[normalized] || { costCodes: {}, total: 0 };
 
     Object.entries(data.costCodes || {}).forEach(([code, hours]) => {
       const normalizedCode = code || 'Unspecified';
-      aggregatedCostCodes[normalized].costCodes[normalizedCode] =
-        (aggregatedCostCodes[normalized].costCodes[normalizedCode] || 0) + (Number(hours) || 0);
-      aggregatedCostCodes[normalized].total += Number(hours) || 0;
+      actualCostCodesAggregated[normalized].costCodes[normalizedCode] =
+        (actualCostCodesAggregated[normalized].costCodes[normalizedCode] || 0) + (Number(hours) || 0);
+      actualCostCodesAggregated[normalized].total += Number(hours) || 0;
+    });
+  });
+
+  Object.entries(budgetCostCodeAreas || {}).forEach(([label, codes]) => {
+    const normalizedArea = normalizeJobLabel(label);
+    if (!normalizedArea) return;
+
+    const mappedKey = mappings[normalizedArea] || (actualTotals[normalizedArea] !== undefined ? normalizedArea : null);
+    const targetKey = mappedKey || normalizedArea;
+
+    budgetCostCodesAggregated[targetKey] = budgetCostCodesAggregated[targetKey] || { costCodes: {}, total: 0 };
+
+    Object.entries(codes || {}).forEach(([code, hours]) => {
+      const normalizedCode = normalizeCostCode(code) || code || 'Unspecified';
+      const numericHours = Number(hours) || 0;
+      budgetCostCodesAggregated[targetKey].costCodes[normalizedCode] =
+        (budgetCostCodesAggregated[targetKey].costCodes[normalizedCode] || 0) + numericHours;
+      budgetCostCodesAggregated[targetKey].total += numericHours;
     });
   });
 
   const budgetAggregated = {};
   const labelMap = { ...actualLabels };
-
-  const mappings = areaConfig.mappings || {};
-  const adjustments = areaConfig.adjustments || { budget: {}, actual: {} };
 
   budgetAreas.forEach(area => {
     const mappedKey = mappings[area.key] || (actualTotals[area.key] !== undefined ? area.key : null);
@@ -180,10 +199,18 @@ async function buildAreaComparison(projectId, latestBudget = null) {
     actualAggregated[normalized] = (actualAggregated[normalized] || 0) + (Number(hours) || 0);
     if (!labelMap[normalized]) labelMap[normalized] = key;
 
-    aggregatedCostCodes[normalized] = aggregatedCostCodes[normalized] || { costCodes: {}, total: 0 };
-    aggregatedCostCodes[normalized].costCodes['Adjustment'] =
-      (aggregatedCostCodes[normalized].costCodes['Adjustment'] || 0) + (Number(hours) || 0);
-    aggregatedCostCodes[normalized].total += Number(hours) || 0;
+    actualCostCodesAggregated[normalized] = actualCostCodesAggregated[normalized] || { costCodes: {}, total: 0 };
+    actualCostCodesAggregated[normalized].costCodes['Adjustment'] =
+      (actualCostCodesAggregated[normalized].costCodes['Adjustment'] || 0) + (Number(hours) || 0);
+    actualCostCodesAggregated[normalized].total += Number(hours) || 0;
+  });
+
+  Object.entries(adjustments.budget || {}).forEach(([key, hours]) => {
+    const normalized = normalizeJobLabel(key);
+    budgetCostCodesAggregated[normalized] = budgetCostCodesAggregated[normalized] || { costCodes: {}, total: 0 };
+    budgetCostCodesAggregated[normalized].costCodes['Adjustment'] =
+      (budgetCostCodesAggregated[normalized].costCodes['Adjustment'] || 0) + (Number(hours) || 0);
+    budgetCostCodesAggregated[normalized].total += Number(hours) || 0;
   });
 
   const allKeys = new Set([
@@ -210,16 +237,17 @@ async function buildAreaComparison(projectId, latestBudget = null) {
   const costCodeBreakdown = {};
 
   const buildCostCodeBreakdown = (targetKey, budgetTotal = 0) => {
-    const breakdown = aggregatedCostCodes[targetKey] || { costCodes: {}, total: 0 };
-    const entries = Object.entries(breakdown.costCodes || {});
-    const actualTotal = entries.reduce((sum, [, hours]) => sum + (Number(hours) || 0), 0);
-    const allocationBase = actualTotal > 0 ? actualTotal : 0;
+    const actualBreakdown = actualCostCodesAggregated[targetKey] || { costCodes: {}, total: 0 };
+    const budgetBreakdown = budgetCostCodesAggregated[targetKey] || { costCodes: {}, total: 0 };
 
-    const costCodeEntries = entries.map(([code, hours]) => {
-      const actualHours = Number(hours) || 0;
-      const budgetHours = budgetTotal > 0 && allocationBase > 0
-        ? (actualHours / allocationBase) * budgetTotal
-        : 0;
+    const allCodes = new Set([
+      ...Object.keys(actualBreakdown.costCodes || {}),
+      ...Object.keys(budgetBreakdown.costCodes || {})
+    ]);
+
+    const costCodeEntries = Array.from(allCodes).map(code => {
+      const actualHours = Number(actualBreakdown.costCodes?.[code]) || 0;
+      const budgetHours = Number(budgetBreakdown.costCodes?.[code]) || 0;
       const varianceHours = actualHours - budgetHours;
 
       return {
@@ -242,7 +270,7 @@ async function buildAreaComparison(projectId, latestBudget = null) {
     }
 
     const allocatedBudget = costCodeEntries.reduce((sum, entry) => sum + entry.budget_hours, 0);
-    if (budgetTotal > 0 && allocationBase > 0 && costCodeEntries.length > 0) {
+    if (budgetTotal > 0 && costCodeEntries.length > 0) {
       const delta = budgetTotal - allocatedBudget;
       const lastEntry = costCodeEntries[costCodeEntries.length - 1];
       lastEntry.budget_hours += delta;
@@ -251,6 +279,8 @@ async function buildAreaComparison(projectId, latestBudget = null) {
         ? (lastEntry.variance_hours / lastEntry.budget_hours) * 100
         : null;
     }
+
+    const actualTotal = costCodeEntries.reduce((sum, entry) => sum + (Number(entry.actual_hours) || 0), 0);
 
     return {
       entries: costCodeEntries,
@@ -426,7 +456,7 @@ app.post('/api/projects/:id/upload', upload.single('payroll'), async (req, res) 
 app.post('/api/projects/:id/budget', async (req, res) => {
   try {
     const projectId = req.params.id;
-    const { filename, costCodeHours, areaHours, costCodeNames } = req.body;
+    const { filename, costCodeHours, areaHours, areaCostCodeHours, costCodeNames } = req.body;
 
     if (!costCodeHours || typeof costCodeHours !== 'object') {
       return res.status(400).json({ error: 'No budget data provided' });
@@ -454,6 +484,24 @@ app.post('/api/projects/:id/budget', async (req, res) => {
       });
     }
 
+    const areaCostCodeHoursClean = {};
+    if (areaCostCodeHours && typeof areaCostCodeHours === 'object') {
+      Object.entries(areaCostCodeHours).forEach(([areaName, codes]) => {
+        if (!areaName || typeof codes !== 'object') return;
+
+        Object.entries(codes).forEach(([code, hours]) => {
+          const normalizedCode = normalizeCostCode(code);
+          const numericHours = parseFloat(hours);
+          if (!normalizedCode || !Number.isFinite(numericHours)) return;
+
+          const cleanArea = areaName.trim();
+          areaCostCodeHoursClean[cleanArea] = areaCostCodeHoursClean[cleanArea] || {};
+          areaCostCodeHoursClean[cleanArea][normalizedCode] =
+            (areaCostCodeHoursClean[cleanArea][normalizedCode] || 0) + numericHours;
+        });
+      });
+    }
+
     const costCodeNamesClean = {};
     if (costCodeNames && typeof costCodeNames === 'object') {
       Object.entries(costCodeNames).forEach(([code, name]) => {
@@ -466,9 +514,9 @@ app.post('/api/projects/:id/budget', async (req, res) => {
       });
     }
 
-    const result = await budgetQueries.create(projectId, filename || 'Budget Upload', normalizedHours, areaHoursClean, costCodeNamesClean);
-    const { comparison, latestBudget, budgetUploads, costCodeNames: alignedCostCodeNames } = await buildBudgetComparison(projectId, { cost_code_hours: normalizedHours, area_hours: areaHoursClean, cost_code_names: costCodeNamesClean });
-    const areaComparison = await buildAreaComparison(projectId, { area_hours: areaHoursClean });
+    const result = await budgetQueries.create(projectId, filename || 'Budget Upload', normalizedHours, areaHoursClean, costCodeNamesClean, areaCostCodeHoursClean);
+    const { comparison, latestBudget, budgetUploads, costCodeNames: alignedCostCodeNames } = await buildBudgetComparison(projectId, { cost_code_hours: normalizedHours, area_hours: areaHoursClean, cost_code_names: costCodeNamesClean, area_cost_code_hours: areaCostCodeHoursClean });
+    const areaComparison = await buildAreaComparison(projectId, { area_hours: areaHoursClean, area_cost_code_hours: areaCostCodeHoursClean });
 
     res.json({
       success: true,

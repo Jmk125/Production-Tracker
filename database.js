@@ -146,7 +146,7 @@ const uploadQueries = {
 
 // Budget queries
 const budgetQueries = {
-  create: async (project_id, filename, cost_code_hours, area_hours = {}, cost_code_names = {}) => {
+  create: async (project_id, filename, cost_code_hours, area_hours = {}, cost_code_names = {}, area_cost_code_hours = {}) => {
     const budgets = readJSON(BUDGETS_FILE);
     const newBudget = {
       id: budgets.length > 0 ? Math.max(...budgets.map(b => b.id)) + 1 : 1,
@@ -155,6 +155,7 @@ const budgetQueries = {
       cost_code_hours,
       area_hours,
       cost_code_names,
+      area_cost_code_hours,
       upload_date: new Date().toISOString()
     };
 
