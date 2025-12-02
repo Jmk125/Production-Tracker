@@ -147,9 +147,14 @@
       </div>
 
       <div class="card" style="margin-top: 1.5rem;">
-        <div class="card-header">
-          <h3 class="card-title">Budget Summary</h3>
-          <div id="budgetMeta" style="color: var(--text-secondary); font-size: 0.9rem;">Loading budget...</div>
+        <div class="card-header" style="align-items: flex-start; justify-content: space-between; gap: 1rem;">
+          <div>
+            <h3 class="card-title">Budget Summary</h3>
+            <div id="budgetMeta" style="color: var(--text-secondary); font-size: 0.9rem;">Loading budget...</div>
+          </div>
+          <label style="display: inline-flex; align-items: center; gap: 0.35rem; font-size: 0.9rem; color: var(--text-secondary);">
+            <input type="checkbox" id="budgetApplyFiltersToggle" onchange="handleBudgetFiltersToggle()"> Apply monthly hours filters
+          </label>
         </div>
         <div id="budgetSummary" style="margin-top: 1rem;">Loading budget...</div>
         <div id="areaVarianceSummary" style="margin-top: 1.25rem;"></div>
@@ -310,6 +315,7 @@
     let budgetComparison = [];
     let costCodeNames = {};
     let areaData = { comparison: [], budgetAreas: [], actualAreas: [], mappings: {}, adjustments: { budget: {}, actual: {} } };
+    let areaBreakdownView = {};
     let budgetSort = { column: 'variance_hours', direction: 'desc' };
     let areaSort = { column: 'variance_hours', direction: 'desc' };
     let hoursChart = null;
@@ -524,7 +530,7 @@
       }
 
       updateCostCodeMasterCheckboxes();
-      updateChart();
+      refreshFilterConsumers();
     }
 
     function toggleAllCostCodes(event) {
@@ -538,7 +544,7 @@
 
       renderCostCodeList();
       updateCostCodeMasterCheckboxes();
-      updateChart();
+      refreshFilterConsumers();
     }
 
     function toggleDivisionCostCodes(event, prefixes) {
@@ -556,7 +562,7 @@
 
       renderCostCodeList();
       updateCostCodeMasterCheckboxes();
-      updateChart();
+      refreshFilterConsumers();
     }
 
     function updateCostCodeMasterCheckboxes() {
@@ -627,7 +633,7 @@
       }
 
       updateJobMasterCheckboxes();
-      updateChart();
+      refreshFilterConsumers();
     }
 
     function toggleAllJobs(event) {
@@ -641,7 +647,7 @@
 
       renderJobList();
       updateJobMasterCheckboxes();
-      updateChart();
+      refreshFilterConsumers();
     }
 
     function updateJobMasterCheckboxes() {
@@ -653,6 +659,14 @@
         allToggle.indeterminate = selectedCount > 0 && selectedCount < totalCount;
         allToggle.checked = totalCount > 0 && selectedCount === totalCount;
       }
+    }
+
+    function refreshFilterConsumers() {
+      updateChart();
+      renderEmployeeChart();
+      renderBudgetSummary();
+      renderBudgetCharts();
+      renderAreaVarianceSummary();
     }
 
     function toggleFilterSection(sectionId, trigger) {
@@ -667,10 +681,32 @@
       }
     }
 
+    function getSelectedCostCodeClients() {
+      return new Set(
+        Array.from(selectedCostCodes)
+          .map(code => normalizeCostCodeClient(code))
+          .filter(Boolean)
+      );
+    }
+
+    function isCostCodeSelected(code) {
+      if (!selectedCostCodes.size) return false;
+
+      const labelCode = normalizeCostCodeLabel(code);
+      const clientCode = normalizeCostCodeClient(code);
+      const selectedClients = getSelectedCostCodeClients();
+
+      return (
+        selectedCostCodes.has(labelCode)
+        || (clientCode && selectedCostCodes.has(clientCode))
+        || (clientCode && selectedClients.has(clientCode))
+      );
+    }
+
     function filterBySelectedCostCodes(data) {
       if (!selectedCostCodes.size) return [];
 
-      return data.filter(entry => selectedCostCodes.has(normalizeCostCodeLabel(entry.cost_code)));
+      return data.filter(entry => isCostCodeSelected(entry.cost_code));
     }
 
     function filterBySelectedJobs(data) {
@@ -916,11 +952,13 @@
       const latest = budgetData.latest;
       metaEl.textContent = `Latest: ${escapeHtml(latest.filename)} • ${new Date(latest.upload_date).toLocaleString()}`;
 
-      const totalBudgetHours = Object.values(latest.cost_code_hours || {}).reduce((sum, val) => sum + Number(val || 0), 0);
-      const totalActualHours = budgetComparison.reduce((sum, row) => sum + (row.actual_hours || 0), 0);
-      const totalVariance = totalActualHours - totalBudgetHours;
+      const applyFilters = document.getElementById('budgetApplyFiltersToggle')?.checked ?? false;
+      const varianceRows = buildBudgetChartRows(applyFilters);
 
-      const varianceRows = sortBudgetRows(budgetComparison);
+      const totalBudgetHours = varianceRows.reduce((sum, row) => sum + (Number(row.budget_hours) || 0), 0);
+      const totalActualHours = varianceRows.reduce((sum, row) => sum + (Number(row.actual_hours) || 0), 0);
+      const totalVariance = totalActualHours - totalBudgetHours;
+      const sortedRows = sortBudgetRows(varianceRows);
 
       summaryEl.innerHTML = `
         <div style="display: grid; gap: 1rem;">
@@ -938,7 +976,7 @@
               <div style="color: var(--text-secondary); font-size: 0.9rem;">Variance (hrs)</div>
             </div>
           </div>
-          ${varianceRows.length ? `
+          ${sortedRows.length ? `
             <div style="overflow-x: auto;">
               <table style="width: 100%; border-collapse: collapse;">
                 <thead>
@@ -972,7 +1010,7 @@
                   </tr>
                 </thead>
                 <tbody>
-                  ${varianceRows.map(row => `
+                  ${sortedRows.map(row => `
                     <tr style="border-bottom: 1px solid var(--border-color);">
                       <td style="padding: 0.5rem; font-weight: 600;">${escapeHtml(row.cost_code)}</td>
                       <td style="padding: 0.5rem; color: var(--text-secondary);">${escapeHtml(row.cost_code_name || getCostCodeName(row.cost_code) || '—')}</td>
@@ -988,6 +1026,12 @@
           ` : '<p style="color: var(--text-secondary);">No budget variance to display yet.</p>'}
         </div>
       `;
+    }
+
+    function handleBudgetFiltersToggle() {
+      renderBudgetSummary();
+      renderBudgetCharts();
+      renderAreaVarianceSummary();
     }
 
     function changeBudgetSort(column) {
@@ -1071,15 +1115,68 @@
       `;
     }
 
+    function buildBudgetChartRows(applyFilters = false) {
+      if (!budgetData || !budgetData.latest) return [];
+
+      if (!applyFilters) return budgetComparison;
+
+      const selectedBudgetClients = getSelectedCostCodeClients();
+      const filteredEntries = filterBySelectedJobs(filterBySelectedCostCodes(timeEntries));
+      const actualTotals = {};
+      const budgetTotals = {};
+      const labelMap = {};
+
+      filteredEntries.forEach(entry => {
+        const code = normalizeCostCodeClient(entry.cost_code) || 'Unknown';
+        actualTotals[code] = (actualTotals[code] || 0) + (Number(entry.hours) || 0);
+      });
+
+      const budgetHours = budgetData.latest.cost_code_hours || {};
+      Object.entries(budgetHours).forEach(([rawCode, hours]) => {
+        const normalized = normalizeCostCodeClient(rawCode);
+        if (!normalized || !selectedBudgetClients.has(normalized)) return;
+
+        budgetTotals[normalized] = (budgetTotals[normalized] || 0) + (Number(hours) || 0);
+        if (!labelMap[normalized]) {
+          labelMap[normalized] = rawCode.toString().trim() || normalized;
+        }
+      });
+
+      const allCodes = new Set([
+        ...Object.keys(budgetTotals),
+        ...Object.keys(actualTotals)
+      ]);
+
+      return Array.from(allCodes).map(code => {
+        const budget = Number(budgetTotals[code]) || 0;
+        const actual = Number(actualTotals[code]) || 0;
+        const variance = actual - budget;
+        const variancePercent = budget > 0 ? (variance / budget) * 100 : null;
+        const displayCode = labelMap[code] || code;
+
+        return {
+          cost_code: displayCode,
+          cost_code_name: getCostCodeName(code) || getCostCodeName(displayCode),
+          budget_hours: budget,
+          actual_hours: actual,
+          variance_hours: variance,
+          variance_percent: variancePercent
+        };
+      });
+    }
+
     function renderBudgetCharts() {
       const varianceCanvas = document.getElementById('budgetVarianceChart');
       const chartMode = document.getElementById('budgetChartMode')?.value || 'hours';
+      const applyFilters = document.getElementById('budgetApplyFiltersToggle')?.checked;
 
       if (budgetChart) budgetChart.destroy();
 
-      if (!budgetData || !budgetData.latest || !budgetComparison.length || !varianceCanvas) return;
+      const displayRows = buildBudgetChartRows(applyFilters);
 
-      const sortedRows = sortBudgetRows(budgetComparison);
+      if (!budgetData || !budgetData.latest || !displayRows.length || !varianceCanvas) return;
+
+      const sortedRows = sortBudgetRows(displayRows);
       const labels = sortedRows.map(row => row.cost_code);
 
       const values = sortedRows.map(row => {
@@ -1244,11 +1341,54 @@
       `;
     }
 
+    function buildAreaVarianceData(applyFilters = false) {
+      const rows = Array.isArray(areaData?.comparison) ? [...areaData.comparison] : [];
+      const breakdownSource = areaData?.costCodeBreakdown || {};
+
+      if (!applyFilters) {
+        return { rows, breakdownMap: breakdownSource };
+      }
+
+      const filteredRows = [];
+      const filteredBreakdown = {};
+
+      rows.forEach(row => {
+        const normalizedKey = normalizeJobLabel(row.key);
+        const normalizedArea = normalizeJobLabel(row.area);
+        const hasJobFilter = selectedJobs.size > 0;
+        const matchesJobSelection = !hasJobFilter
+          || selectedJobs.has(normalizedKey)
+          || selectedJobs.has(normalizedArea);
+
+        if (!matchesJobSelection) return;
+
+        const sourceBreakdown = breakdownSource?.[row.key]?.entries || [];
+        const entries = sourceBreakdown.filter(entry => isCostCodeSelected(entry.cost_code));
+
+        const actualHours = entries.reduce((sum, entry) => sum + (Number(entry.actual_hours) || 0), 0);
+        const budgetHours = entries.reduce((sum, entry) => sum + (Number(entry.budget_hours) || 0), 0);
+        const varianceHours = actualHours - budgetHours;
+        const variancePercent = budgetHours > 0 ? (varianceHours / budgetHours) * 100 : null;
+
+        filteredBreakdown[row.key] = { entries, totalActual: actualHours, totalBudget: budgetHours };
+        filteredRows.push({
+          ...row,
+          actual_hours: actualHours,
+          budget_hours: budgetHours,
+          variance_hours: varianceHours,
+          variance_percent: variancePercent
+        });
+      });
+
+      return { rows: filteredRows, breakdownMap: filteredBreakdown };
+    }
+
     function renderAreaVarianceSummary() {
       const container = document.getElementById('areaVarianceSummary');
       const currentMode = document.getElementById('areaVarianceChartMode')?.value || 'hours';
       const viewMode = document.getElementById('areaVarianceViewMode')?.value || 'area';
       const stackBars = document.getElementById('areaVarianceStackToggle')?.checked ?? true;
+      const applyFilters = document.getElementById('areaVarianceApplyFiltersToggle')?.checked ?? false;
       if (!container) return;
 
       if (!areaData || !Array.isArray(areaData.comparison) || areaData.comparison.length === 0) {
@@ -1260,7 +1400,19 @@
         return;
       }
 
-      const rows = sortAreaRows(areaData.comparison);
+      const { rows, breakdownMap } = buildAreaVarianceData(applyFilters);
+      areaBreakdownView = breakdownMap;
+
+      if (!rows.length) {
+        container.innerHTML = '<p style="color: var(--text-secondary);">No matching areas for the current filters.</p>';
+        if (areaVarianceChart) {
+          areaVarianceChart.destroy();
+          areaVarianceChart = null;
+        }
+        return;
+      }
+
+      const sortedRows = sortAreaRows(rows);
 
       container.innerHTML = `
         <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 0.5rem; gap: 1rem; flex-wrap: wrap;">
@@ -1282,6 +1434,9 @@
             <label style="display: inline-flex; align-items: center; gap: 0.35rem; font-size: 0.9rem; color: var(--text-secondary);">
               <input type="checkbox" id="areaVarianceStackToggle" ${stackBars ? 'checked' : ''} onchange="renderAreaVarianceSummary()"> Stack bars
             </label>
+              <label style="display: inline-flex; align-items: center; gap: 0.35rem; font-size: 0.9rem; color: var(--text-secondary);">
+                <input type="checkbox" id="areaVarianceApplyFiltersToggle" ${applyFilters ? 'checked' : ''} onchange="renderAreaVarianceSummary()"> Apply monthly hours filters
+              </label>
           </div>
         </div>
         <div style="overflow-x: auto;">
@@ -1316,8 +1471,8 @@
               </tr>
             </thead>
             <tbody>
-              ${rows.map(row => {
-                const breakdown = areaData.costCodeBreakdown?.[row.key]?.entries || [];
+              ${sortedRows.map(row => {
+                const breakdown = breakdownMap?.[row.key]?.entries || [];
                 const hasBreakdown = breakdown.length > 0;
                 return `
                   <tr style="border-bottom: 1px solid var(--border-color);">
@@ -1347,7 +1502,7 @@
         </div>
       `;
 
-      renderAreaVarianceChart(rows, currentMode, viewMode, stackBars);
+      renderAreaVarianceChart(sortedRows, currentMode, viewMode, stackBars, breakdownMap);
     }
 
     function changeAreaSort(column) {
@@ -1402,7 +1557,8 @@
     }
 
     function renderCostCodeBreakdown(row) {
-      const breakdown = areaData.costCodeBreakdown?.[row.key];
+      const breakdownSource = areaBreakdownView || areaData.costCodeBreakdown || {};
+      const breakdown = breakdownSource?.[row.key];
       if (!breakdown || !Array.isArray(breakdown.entries) || breakdown.entries.length === 0) {
         return '<div class="empty-breakdown">No cost code detail for this area yet.</div>';
       }
@@ -1440,7 +1596,7 @@
       `;
     }
 
-    function renderAreaVarianceChart(rows = [], mode = 'hours', viewMode = 'area', stackBars = true) {
+    function renderAreaVarianceChart(rows = [], mode = 'hours', viewMode = 'area', stackBars = true, breakdownMap = {}) {
       const canvas = document.getElementById('areaVarianceChart');
 
       if (areaVarianceChart) {
@@ -1455,8 +1611,6 @@
       const labels = rows.map(row => row.area);
       const yLabel = mode === 'percent' ? 'Percent' : 'Hours';
       const dataLabel = mode === 'percent' ? 'Variance (%)' : 'Variance (hrs)';
-
-      const breakdownMap = areaData.costCodeBreakdown || {};
 
       const costCodes = viewMode === 'costCode'
         ? Array.from(new Set(rows.flatMap(row => (breakdownMap[row.key]?.entries || []).map(entry => entry.cost_code)))).sort()
@@ -1516,7 +1670,7 @@
           responsive: true,
           maintainAspectRatio: false,
           plugins: {
-            legend: { display: viewMode === 'costCode' },
+            legend: { display: false },
             tooltip: {
               callbacks: {
                 label: (context) => {
@@ -2231,12 +2385,17 @@
       document.getElementById(tabName + 'Tab').classList.add('active');
     }
 
-    // Normalize cost codes to numeric-only strings (drops decimals)
+    // Normalize cost codes to numeric-only strings (drops decimals and leading zeros)
     function normalizeCostCodeClient(code) {
       if (code === undefined || code === null) return null;
       const [mainPart] = code.toString().split('.');
       const numeric = mainPart.replace(/\D/g, '').trim();
-      return numeric || null;
+      if (!numeric) return null;
+
+      const asNumber = parseInt(numeric, 10);
+      if (Number.isNaN(asNumber)) return null;
+
+      return asNumber.toString();
     }
 
     function getCostCodeName(code) {
