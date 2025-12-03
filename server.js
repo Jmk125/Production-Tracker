@@ -84,12 +84,21 @@ function alignBudgetCostCodes(budgetHours = {}, actualTotals = {}) {
       return;
     }
 
-    // Normalize to handle both leading and trailing zeros
-    // "09100" vs "9100" (leading) and "12220" vs "1222" (trailing)
+    // Try normalized comparison (handles leading/trailing zeros)
     const budgetNormalized = normalizeForComparison(budgetCode);
-    const matchingActual = actualCodes.find(code =>
+    let matchingActual = actualCodes.find(code =>
       normalizeForComparison(code) === budgetNormalized
     );
+
+    // If still no match and budget code starts with "1-" through "9-",
+    // try adding a leading zero (handles Excel number formatting that strips leading zeros)
+    if (!matchingActual && /^[1-9]-/.test(budgetCode)) {
+      const withLeadingZero = '0' + budgetCode;
+      const withLeadingZeroNormalized = normalizeForComparison(withLeadingZero);
+      matchingActual = actualCodes.find(code =>
+        normalizeForComparison(code) === withLeadingZeroNormalized
+      );
+    }
 
     const targetCode = matchingActual || budgetCode;
     aligned[targetCode] = (aligned[targetCode] || 0) + hours;
@@ -113,11 +122,20 @@ function alignCostCodeNames(budgetNames = {}, actualTotals = {}) {
       return;
     }
 
-    // Normalize to handle both leading and trailing zeros
+    // Try normalized comparison
     const budgetNormalized = normalizeForComparison(budgetCode);
-    const matchingActual = actualCodes.find(code =>
+    let matchingActual = actualCodes.find(code =>
       normalizeForComparison(code) === budgetNormalized
     );
+
+    // If still no match and budget code starts with "1-" through "9-", try adding a leading zero
+    if (!matchingActual && /^[1-9]-/.test(budgetCode)) {
+      const withLeadingZero = '0' + budgetCode;
+      const withLeadingZeroNormalized = normalizeForComparison(withLeadingZero);
+      matchingActual = actualCodes.find(code =>
+        normalizeForComparison(code) === withLeadingZeroNormalized
+      );
+    }
 
     const targetCode = matchingActual || budgetCode;
     if (!aligned[targetCode]) {
