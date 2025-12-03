@@ -731,6 +731,30 @@ app.get('/comparison', (req, res) => {
   res.sendFile(path.join(__dirname, 'public', 'comparison.html'));
 });
 
+// Debug endpoint to check stored cost codes
+app.get('/api/debug/cost-codes/:projectId', async (req, res) => {
+  try {
+    const projectId = req.params.projectId;
+
+    // Get actual codes from entries
+    const actualTotals = await timeEntryQueries.getCostCodeTotals(projectId);
+
+    // Get budget codes
+    const budgetUploads = await budgetQueries.getByProject(projectId);
+    const budgetHours = budgetUploads[0]?.cost_code_hours || {};
+
+    res.json({
+      actualCodes: Object.keys(actualTotals).sort(),
+      budgetCodes: Object.keys(budgetHours).sort(),
+      sampleActualEntry: actualTotals[Object.keys(actualTotals)[0]],
+      sampleBudgetEntry: budgetHours[Object.keys(budgetHours)[0]]
+    });
+  } catch (error) {
+    console.error('Debug error:', error);
+    res.status(500).json({ error: error.message });
+  }
+});
+
 // Start server
 app.listen(PORT, () => {
   console.log(`Payroll Tracker server running on port ${PORT}`);
