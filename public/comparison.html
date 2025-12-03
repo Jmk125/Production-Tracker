@@ -43,9 +43,9 @@
       <!-- Comparison View -->
       <div>
         <div class="card" style="margin-bottom: 1.5rem;">
-          <div class="card-header">
-            <h3 class="card-title">Timeline Comparison</h3>
-            <div style="display: flex; gap: 1rem; flex-wrap: wrap; justify-content: flex-end; align-items: center;">
+            <div class="card-header">
+              <h3 class="card-title">Timeline Comparison</h3>
+            <div class="timeline-control-group" style="display: flex; gap: 1rem; flex-wrap: wrap; justify-content: flex-end; align-items: center;">
               <select id="timelineType" onchange="updateCharts()">
                 <option value="project">Project Timeline (Month 1, 2, 3...)</option>
                 <option value="calendar">Calendar Timeline</option>
@@ -229,7 +229,21 @@
     ];
     const packageViewTypes = ['division09', 'package06Combo', 'packageComparison'];
 
-    document.addEventListener('DOMContentLoaded', loadProjects);
+    document.addEventListener('DOMContentLoaded', () => {
+      removeDuplicateTimelineControls();
+      loadProjects();
+    });
+
+    function removeDuplicateTimelineControls() {
+      const controlGroups = document.querySelectorAll('.timeline-control-group');
+      if (controlGroups.length <= 1) return;
+
+      controlGroups.forEach((group, index) => {
+        if (index > 0) {
+          group.remove();
+        }
+      });
+    }
 
     async function loadProjects() {
       try {
