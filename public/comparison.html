@@ -229,20 +229,44 @@
     ];
     const packageViewTypes = ['division09', 'package06Combo', 'packageComparison'];
 
+    let primaryTimelineControls = null;
+
     document.addEventListener('DOMContentLoaded', () => {
-      removeDuplicateTimelineControls();
+      enforceSingleTimelineControls();
       loadProjects();
     });
 
-    function removeDuplicateTimelineControls() {
+    function enforceSingleTimelineControls() {
       const controlGroups = document.querySelectorAll('.timeline-control-group');
-      if (controlGroups.length <= 1) return;
-
-      controlGroups.forEach((group, index) => {
-        if (index > 0) {
+      controlGroups.forEach(group => {
+        if (!primaryTimelineControls) {
+          primaryTimelineControls = group;
+        } else if (group !== primaryTimelineControls) {
           group.remove();
         }
       });
+
+      const observer = new MutationObserver(mutations => {
+        mutations.forEach(mutation => {
+          mutation.addedNodes.forEach(node => {
+            if (node.nodeType !== Node.ELEMENT_NODE) return;
+
+            const addedGroups = node.matches && node.matches('.timeline-control-group')
+              ? [node]
+              : Array.from(node.querySelectorAll ? node.querySelectorAll('.timeline-control-group') : []);
+
+            addedGroups.forEach(group => {
+              if (!primaryTimelineControls) {
+                primaryTimelineControls = group;
+              } else if (group !== primaryTimelineControls) {
+                group.remove();
+              }
+            });
+          });
+        });
+      });
+
+      observer.observe(document.body, { childList: true, subtree: true });
     }
 
     async function loadProjects() {
