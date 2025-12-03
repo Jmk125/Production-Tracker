@@ -90,9 +90,9 @@ function alignBudgetCostCodes(budgetHours = {}, actualTotals = {}) {
       normalizeForComparison(code) === budgetNormalized
     );
 
-    // If still no match and budget code starts with "1-" through "9-",
-    // try adding a leading zero (handles Excel number formatting that strips leading zeros)
-    if (!matchingActual && /^[1-9]-/.test(budgetCode)) {
+    // If still no match, try adding a leading zero as a last resort
+    // (handles Excel number formatting that strips leading zeros: "12-000" -> "012-000")
+    if (!matchingActual && budgetCode.length > 0 && budgetCode[0] !== '0') {
       const withLeadingZero = '0' + budgetCode;
       const withLeadingZeroNormalized = normalizeForComparison(withLeadingZero);
       matchingActual = actualCodes.find(code =>
@@ -128,8 +128,8 @@ function alignCostCodeNames(budgetNames = {}, actualTotals = {}) {
       normalizeForComparison(code) === budgetNormalized
     );
 
-    // If still no match and budget code starts with "1-" through "9-", try adding a leading zero
-    if (!matchingActual && /^[1-9]-/.test(budgetCode)) {
+    // If still no match, try adding a leading zero as a last resort
+    if (!matchingActual && budgetCode.length > 0 && budgetCode[0] !== '0') {
       const withLeadingZero = '0' + budgetCode;
       const withLeadingZeroNormalized = normalizeForComparison(withLeadingZero);
       matchingActual = actualCodes.find(code =>
