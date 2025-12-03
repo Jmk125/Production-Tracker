@@ -45,7 +45,7 @@
         <div class="card" style="margin-bottom: 1.5rem;">
             <div class="card-header">
               <h3 class="card-title">Timeline Comparison</h3>
-              <div style="display: flex; gap: 1rem; flex-wrap: wrap; justify-content: flex-end;">
+            <div class="timeline-control-group" style="display: flex; gap: 1rem; flex-wrap: wrap; justify-content: flex-end; align-items: center;">
               <select id="timelineType" onchange="updateCharts()">
                 <option value="project">Project Timeline (Month 1, 2, 3...)</option>
                 <option value="calendar">Calendar Timeline</option>
@@ -60,11 +60,15 @@
                 <option value="package06Combo">06 Package (Div 06, 08, 10, 11, 12)</option>
                 <option value="packageComparison">Packages: 09 vs 06/08/10/11/12</option>
               </select>
-              <div style="display: flex; gap: 0.75rem; align-items: center; flex-wrap: wrap;">
+              <div class="chart-controls" style="display: flex; gap: 0.75rem; align-items: center; flex-wrap: wrap;">
+                <label class="checkbox" style="margin: 0;">
+                  <input type="checkbox" id="showAverageCurvesToggle" onchange="updateCharts()">
+                  Show average curves
+                </label>
                 <select id="averageCurveMode" onchange="updateCharts()">
                   <option value="actual">Show actual only</option>
                   <option value="average">Average curves</option>
-                  <option value="overlay">Actual with average overlay</option>
+                  <option value="overlay" selected>Actual with average overlay</option>
                 </select>
                 <label class="checkbox" style="margin: 0;">
                   <input type="checkbox" id="combinedAverageToggle" checked onchange="updateCharts()">
@@ -128,10 +132,18 @@
               <h3 class="card-title">Cost Code Variance</h3>
               <div style="color: var(--text-secondary); font-size: 0.9rem;">Spent vs. budgeted hours by cost code</div>
             </div>
-            <div style="display: flex; gap: 1rem; align-items: center;">
+            <div style="display: flex; gap: 1rem; align-items: center; flex-wrap: wrap; justify-content: flex-end;">
               <button class="btn btn-secondary" onclick="openCodeMappingModal()" style="font-size: 0.875rem;">
                 Manage Code Mappings
               </button>
+              <label class="checkbox" style="margin: 0; display: flex; align-items: center; gap: 0.35rem;">
+                <input type="checkbox" id="showVarianceAverageBar" onchange="renderCostCodeVarianceChart(getFilteredComparisonData())">
+                Show average bar
+              </label>
+              <label class="checkbox" style="margin: 0; display: flex; align-items: center; gap: 0.35rem;">
+                <input type="checkbox" id="varianceAverageOnlyToggle" onchange="renderCostCodeVarianceChart(getFilteredComparisonData())" disabled>
+                Average only
+              </label>
               <div style="color: var(--text-secondary); font-size: 0.9rem;">Respects cost code filters</div>
             </div>
           </div>
@@ -196,7 +208,45 @@
     ];
     const packageViewTypes = ['division09', 'package06Combo', 'packageComparison'];
 
-    document.addEventListener('DOMContentLoaded', loadProjects);
+    let primaryTimelineControls = null;
+
+    document.addEventListener('DOMContentLoaded', () => {
+      enforceSingleTimelineControls();
+      loadProjects();
+    });
+
+    function enforceSingleTimelineControls() {
+      const controlGroups = document.querySelectorAll('.timeline-control-group');
+      controlGroups.forEach(group => {
+        if (!primaryTimelineControls) {
+          primaryTimelineControls = group;
+        } else if (group !== primaryTimelineControls) {
+          group.remove();
+        }
+      });
+
+      const observer = new MutationObserver(mutations => {
+        mutations.forEach(mutation => {
+          mutation.addedNodes.forEach(node => {
+            if (node.nodeType !== Node.ELEMENT_NODE) return;
+
+            const addedGroups = node.matches && node.matches('.timeline-control-group')
+              ? [node]
+              : Array.from(node.querySelectorAll ? node.querySelectorAll('.timeline-control-group') : []);
+
+            addedGroups.forEach(group => {
+              if (!primaryTimelineControls) {
+                primaryTimelineControls = group;
+              } else if (group !== primaryTimelineControls) {
+                group.remove();
+              }
+            });
+          });
+        });
+      });
+
+      observer.observe(document.body, { childList: true, subtree: true });
+    }
 
     async function loadProjects() {
       try {
@@ -803,9 +853,10 @@
 
     function applyAverageCurve(chartData) {
       const mode = document.getElementById('averageCurveMode')?.value || 'actual';
+      const showAverages = document.getElementById('showAverageCurvesToggle')?.checked;
       const includeCombined = document.getElementById('combinedAverageToggle')?.checked;
 
-      if (mode === 'actual' || !chartData?.datasets?.length) {
+      if (!showAverages || mode === 'actual' || !chartData?.datasets?.length) {
         return chartData;
       }
 
@@ -893,9 +944,47 @@
       };
     }
 
+    function buildVarianceAverageDataset(datasets = [], labels = []) {
+      const totals = labels.map(() => 0);
+      const counts = labels.map(() => 0);
+
+      datasets.forEach(dataset => {
+        (dataset.data || []).forEach((value, index) => {
+          if (Number.isFinite(value)) {
+            totals[index] += value;
+            counts[index] += 1;
+          }
+        });
+      });
+
+      const averages = totals.map((sum, index) => counts[index]
+        ? Number((sum / counts[index]).toFixed(2))
+        : 0
+      );
+
+      return {
+        label: 'All Projects Average',
+        data: averages,
+        backgroundColor: 'rgba(16, 24, 40, 0.78)',
+        borderColor: 'rgba(16, 24, 40, 0.95)',
+        borderWidth: 2,
+        costCodeRows: null,
+        isAverageBar: true
+      };
+    }
+
     function renderCostCodeVarianceChart(data = comparisonData) {
       const container = document.getElementById('costCodeVarianceTable');
       const card = document.getElementById('costCodeVarianceCard');
+      const showAverageBar = document.getElementById('showVarianceAverageBar')?.checked;
+      const averageOnlyToggle = document.getElementById('varianceAverageOnlyToggle');
+      const averageOnly = !!showAverageBar && !!averageOnlyToggle?.checked;
+
+      if (averageOnlyToggle) {
+        averageOnlyToggle.disabled = !showAverageBar;
+        if (!showAverageBar) averageOnlyToggle.checked = false;
+      }
+
       if (!container || !card) return;
 
       if (costCodeVarianceChart) {
@@ -928,7 +1017,7 @@
       }
 
       const sortedCodes = Array.from(costCodes).sort();
-      const datasets = data.map((project, index) => {
+      const projectDatasets = data.map((project, index) => {
         const color = getColor(index);
         const rowsByCode = {};
 
@@ -949,6 +1038,16 @@
           costCodeRows: rowsByCode
         };
       });
+
+      const averageDataset = showAverageBar
+        ? buildVarianceAverageDataset(projectDatasets, sortedCodes)
+        : null;
+
+      const datasets = averageOnly && averageDataset
+        ? [averageDataset]
+        : averageDataset
+          ? [...projectDatasets, averageDataset]
+          : projectDatasets;
 
       const allValues = datasets.flatMap(ds => ds.data.filter(v => Number.isFinite(v)));
       const suggestedMin = allValues.length ? Math.min(0, Math.min(...allValues) * 1.1) : 0;
@@ -982,6 +1081,10 @@
                   const varianceLabel = Number.isFinite(varianceHours)
                     ? varianceHours.toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })
                     : '—';
+
+                  if (context.dataset.isAverageBar) {
+                    return `${context.dataset.label} – ${costCodeLabel}: ${varianceLabel} hrs`;
+                  }
 
                   if (!row) return `${context.dataset.label}: ${varianceLabel} hrs`;
 
@@ -1352,6 +1455,7 @@
           })
         );
 
+        mergeMappedCostCodeNames(projectMappings);
         renderCodeMappings(projectMappings);
       } catch (error) {
         console.error('Error loading code mappings:', error);
@@ -1359,103 +1463,199 @@
       }
     }
 
+
+    function mergeMappedCostCodeNames(projectMappings) {
+      const updatedNames = { ...(comparisonCostCodeNames || {}) };
+
+      projectMappings.forEach(({ project, mappings }) => {
+        const budgetNameMap = {};
+
+        (project.budgetComparison || []).forEach(row => {
+          if (!row.cost_code || !row.cost_code_name) return;
+          const normalized = normalizeCostCodeValue(row.cost_code);
+          const cleanName = row.cost_code_name?.toString().trim();
+          if (!normalized || !cleanName) return;
+          budgetNameMap[normalized] = cleanName;
+        });
+
+        Object.entries(mappings || {}).forEach(([budget, actual]) => {
+          const normalizedActual = normalizeCostCodeValue(actual);
+          const normalizedBudget = normalizeCostCodeValue(budget);
+          if (!normalizedActual || !normalizedBudget) return;
+
+          if (!updatedNames[normalizedActual] && budgetNameMap[normalizedBudget]) {
+            updatedNames[normalizedActual] = budgetNameMap[normalizedBudget];
+          }
+        });
+      });
+
+      comparisonCostCodeNames = updatedNames;
+    }
+
+
     function renderCodeMappings(projectMappings) {
       const container = document.getElementById('codeMappingProjects');
 
       container.innerHTML = projectMappings.map(({ project, mappings }) => {
         const projectName = project.data[0]?.project_name || `Project ${project.projectId}`;
 
-        // Get all budget codes and actual codes for this project
         const budgetCodes = new Set();
         const actualCodes = new Set();
+        const budgetStats = {};
+        const actualTotals = {};
 
         (project.budgetComparison || []).forEach(row => {
-          if (row.cost_code) budgetCodes.add(row.cost_code);
-          if (row.actual_hours > 0 && row.cost_code) actualCodes.add(row.cost_code);
+          if (row.cost_code) {
+            budgetCodes.add(row.cost_code);
+            budgetStats[row.cost_code] = {
+              budget: Number(row.budget_hours) || 0,
+              actual: Number(row.actual_hours) || 0
+            };
+            if (row.actual_hours > 0) {
+              actualCodes.add(row.cost_code);
+            }
+          }
         });
 
-        // Get actual codes from the raw data as well
         (project.data || []).forEach(entry => {
-          if (entry.cost_code) actualCodes.add(entry.cost_code);
+          if (entry.cost_code) {
+            actualCodes.add(entry.cost_code);
+            const hours = Number(entry.total_hours) || 0;
+            actualTotals[entry.cost_code] = (actualTotals[entry.cost_code] || 0) + hours;
+          }
         });
 
         const sortedBudgetCodes = Array.from(budgetCodes).sort();
         const sortedActualCodes = Array.from(actualCodes).sort();
+        const mappedActualToBudget = Object.entries(mappings || {}).reduce((acc, [budget, actual]) => {
+          acc[actual] = budget;
+          return acc;
+        }, {});
+
+        const matchedAutomatically = sortedBudgetCodes.filter(code => {
+          const stats = budgetStats[code] || {};
+          const budgetHours = Number(stats.budget) || 0;
+          const spentHours = (Number(stats.actual) || 0) + (Number(actualTotals[code]) || 0);
+          return budgetHours > 0 && spentHours > 0;
+        });
+
+        const matchedCount = new Set([
+          ...matchedAutomatically,
+          ...Object.keys(mappings || {})
+        ]).size;
+
+        const unmatchedBudgetCodes = sortedBudgetCodes.filter(code => {
+          const stats = budgetStats[code] || {};
+          const budgetHours = Number(stats.budget) || 0;
+          const spentHours = (Number(stats.actual) || 0) + (Number(actualTotals[code]) || 0);
+          return budgetHours > 0 && spentHours === 0;
+        });
+
+        const unmatchedActualCodes = sortedActualCodes.filter(code => {
+          const stats = budgetStats[code] || {};
+          const budgetHours = Number(stats.budget) || 0;
+          if (budgetHours > 0) return false;
+          const mappedBudget = mappedActualToBudget[code];
+          return !mappedBudget;
+        });
+
+        const budgetRows = sortedBudgetCodes.map(code => {
+          const mappedTarget = mappings[code] || '';
+          const availableActualCodes = unmatchedActualCodes.filter(actualCode => {
+            const mappedBudget = mappedActualToBudget[actualCode];
+            return !mappedBudget || mappedBudget === code;
+          });
+
+          if (mappedTarget && !availableActualCodes.includes(mappedTarget)) {
+            availableActualCodes.unshift(mappedTarget);
+          }
+
+          const budgetInfo = budgetStats[code] || { budget: 0, actual: 0 };
+          const hasSpentHours = (Number(budgetInfo.actual) || 0) + (Number(actualTotals[code]) || 0) > 0;
+          const mappedLabel = mappedTarget
+            ? `<span style="display: inline-flex; align-items: center; gap: 0.35rem; padding: 0.35rem 0.5rem; background: var(--success-surface); border-radius: 999px; color: var(--success-color); font-size: 0.8rem;">Matched to ${escapeHtml(mappedTarget)}</span>`
+            : hasSpentHours
+              ? `<span style="display: inline-flex; align-items: center; gap: 0.35rem; padding: 0.35rem 0.5rem; background: rgba(34,197,94,0.12); border-radius: 999px; color: var(--success-color); font-size: 0.8rem;">Auto-matched by code</span>`
+              : `<span style="display: inline-flex; align-items: center; gap: 0.35rem; padding: 0.35rem 0.5rem; background: var(--card-background); border-radius: 999px; color: var(--text-secondary); font-size: 0.8rem;">Unmatched</span>`;
+
+          return `
+            <div style="display: grid; grid-template-columns: 1.2fr 1fr 0.9fr; gap: 0.75rem; align-items: center; padding: 0.65rem 0.75rem; border: 1px solid var(--border-color); border-radius: 6px; background: var(--card-background);">
+              <div style="display: grid; gap: 0.25rem;">
+                <div style="font-family: monospace; font-weight: 600;">${escapeHtml(code)}</div>
+                <div style="color: var(--text-secondary); font-size: 0.85rem;">Budgeted ${formatHours(budgetInfo.budget)} hrs · Spent ${formatHours(budgetInfo.actual)} hrs</div>
+              </div>
+              <div style="display: flex; align-items: center; gap: 0.5rem; flex-wrap: wrap;">
+                ${mappedLabel}
+              </div>
+              <div style="display: flex; align-items: center; gap: 0.5rem; justify-content: flex-end;">
+                <select
+                  class="form-control"
+                  style="min-width: 180px; font-family: monospace;"
+                  onchange="handleMappingSelect(${project.projectId}, '${encodeURIComponent(code)}', this.value)"
+                  value="${escapeHtml(mappedTarget)}"
+                >
+                  <option value="">Select actual code...</option>
+                  ${availableActualCodes.map(actualCode => `
+                    <option value="${escapeHtml(actualCode)}" ${mappedTarget === actualCode ? 'selected' : ''}>${escapeHtml(actualCode)}</option>
+                  `).join('')}
+                </select>
+              </div>
+            </div>
+          `;
+        }).join('') || '<div class="empty-filter">No budget codes found.</div>';
+
+        const actualRows = sortedActualCodes.map(code => {
+          const mappedBudget = mappedActualToBudget[code];
+          const stats = budgetStats[code] || {};
+          const budgetHours = Number(stats.budget) || 0;
+          const statusLabel = budgetHours > 0
+            ? 'Auto-matched by code'
+            : mappedBudget
+              ? `Matched to ${escapeHtml(mappedBudget)}`
+              : 'Not matched yet';
+          const isUnmatched = budgetHours === 0 && !mappedBudget;
+          return `
+            <div style="display: flex; justify-content: space-between; align-items: center; padding: 0.5rem 0.75rem; border: 1px dashed var(--border-color); border-radius: 6px; background: var(--background);">
+              <div>
+                <div style="font-family: monospace; font-weight: 600;">${escapeHtml(code)}</div>
+                <div style="color: var(--text-secondary); font-size: 0.85rem;">${statusLabel}</div>
+              </div>
+              <span style="font-size: 0.8rem; color: ${isUnmatched ? 'var(--warning-color)' : 'var(--success-color)'}; background: ${isUnmatched ? 'rgba(234,179,8,0.12)' : 'var(--success-surface)'}; padding: 0.3rem 0.55rem; border-radius: 999px;">${isUnmatched ? 'Unmapped' : 'Mapped'}</span>
+            </div>
+          `;
+        }).join('') || '<div class="empty-filter">No actual codes found.</div>';
 
         return `
           <div class="card" style="margin-bottom: 1.5rem; background-color: var(--background);">
-            <h4 style="margin-bottom: 1rem;">${escapeHtml(projectName)}</h4>
+            <div style="display: flex; justify-content: space-between; align-items: center; gap: 1rem; margin-bottom: 0.5rem; flex-wrap: wrap;">
+              <h4 style="margin: 0;">${escapeHtml(projectName)}</h4>
+              <div style="display: flex; gap: 0.5rem; flex-wrap: wrap;">
+                <span class="chip" style="background: var(--card-background);">${sortedBudgetCodes.length} budget codes</span>
+                <span class="chip" style="background: var(--card-background);">${sortedActualCodes.length} spent codes</span>
+                <span class="chip" style="background: var(--success-surface); color: var(--success-color);">${matchedCount} matched</span>
+                <span class="chip" style="background: rgba(234,179,8,0.12); color: var(--warning-color);">${unmatchedBudgetCodes.length} to match</span>
+              </div>
+            </div>
 
-            ${Object.keys(mappings).length > 0 ? `
-              <div style="margin-bottom: 1.5rem;">
-                <h5 style="font-size: 0.875rem; font-weight: 600; margin-bottom: 0.5rem; color: var(--text-secondary);">
-                  Current Mappings
-                </h5>
-                <div style="display: grid; gap: 0.5rem;">
-                  ${Object.entries(mappings).map(([budgetCode, actualCode]) => `
-                    <div style="display: flex; align-items: center; gap: 1rem; padding: 0.5rem; background: var(--card-background); border-radius: 4px;">
-                      <span style="font-family: monospace; font-weight: 600;">${escapeHtml(budgetCode)}</span>
-                      <span style="color: var(--text-secondary);">→</span>
-                      <span style="font-family: monospace; flex: 1;">${escapeHtml(actualCode)}</span>
-                      <button
-                        class="btn btn-danger"
-                        style="font-size: 0.75rem; padding: 0.25rem 0.5rem;"
-                        onclick="deleteCodeMapping(${project.projectId}, '${budgetCode}')"
-                      >
-                        Delete
-                      </button>
-                    </div>
-                  `).join('')}
+            <div style="display: grid; gap: 1rem; margin-top: 0.5rem;">
+              <div>
+                <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 0.35rem;">
+                  <h5 style="font-size: 0.95rem; margin: 0;">Budgeted cost codes</h5>
+                  <div style="color: var(--text-secondary); font-size: 0.85rem;">Select the matching actual code for each budget code.</div>
+                </div>
+                <div style="display: grid; gap: 0.6rem;">
+                  ${budgetRows}
                 </div>
               </div>
-            ` : ''}
 
-            <div>
-              <h5 style="font-size: 0.875rem; font-weight: 600; margin-bottom: 0.5rem; color: var(--text-secondary);">
-                Add New Mapping
-              </h5>
-              <div style="display: grid; grid-template-columns: 1fr auto 1fr auto; gap: 0.75rem; align-items: center;">
-                <div>
-                  <label style="display: block; font-size: 0.75rem; margin-bottom: 0.25rem; color: var(--text-secondary);">
-                    Budget Code
-                  </label>
-                  <select
-                    id="budgetCode_${project.projectId}"
-                    class="form-control"
-                    style="width: 100%; font-family: monospace;"
-                  >
-                    <option value="">Select budget code...</option>
-                    ${sortedBudgetCodes.map(code => `
-                      <option value="${escapeHtml(code)}">${escapeHtml(code)}</option>
-                    `).join('')}
-                  </select>
+              <div>
+                <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 0.35rem;">
+                  <h5 style="font-size: 0.95rem; margin: 0;">Spent cost codes</h5>
+                  <div style="color: var(--text-secondary); font-size: 0.85rem;">${unmatchedActualCodes.length} available to match.</div>
                 </div>
-
-                <span style="color: var(--text-secondary); margin-top: 1.25rem;">→</span>
-
-                <div>
-                  <label style="display: block; font-size: 0.75rem; margin-bottom: 0.25rem; color: var(--text-secondary);">
-                    Actual Code
-                  </label>
-                  <select
-                    id="actualCode_${project.projectId}"
-                    class="form-control"
-                    style="width: 100%; font-family: monospace;"
-                  >
-                    <option value="">Select actual code...</option>
-                    ${sortedActualCodes.map(code => `
-                      <option value="${escapeHtml(code)}">${escapeHtml(code)}</option>
-                    `).join('')}
-                  </select>
+                <div style="display: grid; gap: 0.5rem; grid-template-columns: repeat(auto-fit, minmax(260px, 1fr));">
+                  ${actualRows}
                 </div>
-
-                <button
-                  class="btn btn-primary"
-                  style="margin-top: 1.25rem;"
-                  onclick="saveCodeMapping(${project.projectId})"
-                >
-                  Add Mapping
-                </button>
               </div>
             </div>
           </div>
@@ -1463,15 +1663,35 @@
       }).join('');
     }
 
-    async function saveCodeMapping(projectId) {
+    async function handleMappingSelect(projectId, encodedBudgetCode, actualCode) {
+      const budgetCode = decodeURIComponent(encodedBudgetCode);
+
+      try {
+        if (!actualCode) {
+          await deleteCodeMapping(projectId, budgetCode, { skipConfirm: true });
+        } else {
+          await saveCodeMapping(projectId, budgetCode, actualCode, { skipValidation: true, skipReset: true });
+        }
+
+        await loadCodeMappings();
+        await loadComparison();
+      } catch (error) {
+        console.error('Error updating mapping:', error);
+        alert('Error updating mapping. Please try again.');
+      }
+    }
+
+    async function saveCodeMapping(projectId, budgetCodeOverride = null, actualCodeOverride = null, options = {}) {
       const budgetCodeSelect = document.getElementById(`budgetCode_${projectId}`);
       const actualCodeSelect = document.getElementById(`actualCode_${projectId}`);
 
-      const budgetCode = budgetCodeSelect.value;
-      const actualCode = actualCodeSelect.value;
+      const budgetCode = budgetCodeOverride ?? budgetCodeSelect?.value ?? '';
+      const actualCode = actualCodeOverride ?? actualCodeSelect?.value ?? '';
 
       if (!budgetCode || !actualCode) {
-        alert('Please select both a budget code and an actual code');
+        if (!options.skipValidation) {
+          alert('Please select both a budget code and an actual code');
+        }
         return;
       }
 
@@ -1486,21 +1706,23 @@
           throw new Error('Failed to save mapping');
         }
 
-        // Reload mappings and refresh the comparison
         await loadCodeMappings();
         await loadComparison();
 
-        // Reset selects
-        budgetCodeSelect.value = '';
-        actualCodeSelect.value = '';
+        if (!options.skipReset && budgetCodeSelect && actualCodeSelect) {
+          budgetCodeSelect.value = '';
+          actualCodeSelect.value = '';
+        }
       } catch (error) {
         console.error('Error saving code mapping:', error);
-        alert('Error saving mapping. Please try again.');
+        if (!options.skipValidation) {
+          alert('Error saving mapping. Please try again.');
+        }
       }
     }
 
-    async function deleteCodeMapping(projectId, budgetCode) {
-      if (!confirm(`Delete mapping for budget code "${budgetCode}"?`)) {
+    async function deleteCodeMapping(projectId, budgetCode, options = {}) {
+      if (!options.skipConfirm && !confirm(`Delete mapping for budget code "${budgetCode}"?`)) {
         return;
       }
 
@@ -1513,12 +1735,13 @@
           throw new Error('Failed to delete mapping');
         }
 
-        // Reload mappings and refresh the comparison
         await loadCodeMappings();
         await loadComparison();
       } catch (error) {
         console.error('Error deleting code mapping:', error);
-        alert('Error deleting mapping. Please try again.');
+        if (!options.skipConfirm) {
+          alert('Error deleting mapping. Please try again.');
+        }
       }
     }
 
