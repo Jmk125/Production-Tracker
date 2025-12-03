@@ -130,12 +130,20 @@ async function buildBudgetComparison(projectId, latestBudget = null) {
   const budgetHours = latestBudget ? latestBudget.cost_code_hours : (budgetUploads[0]?.cost_code_hours || {});
   const budgetNames = latestBudget ? (latestBudget.cost_code_names || {}) : (budgetUploads[0]?.cost_code_names || {});
 
+  console.log(`\n=== Building Budget Comparison for Project ${projectId} ===`);
+  console.log('Budget codes:', Object.keys(budgetHours).slice(0, 5), `(${Object.keys(budgetHours).length} total)`);
+  console.log('Actual codes:', Object.keys(actualTotals).slice(0, 5), `(${Object.keys(actualTotals).length} total)`);
+
   const alignedBudget = alignBudgetCostCodes(budgetHours, actualTotals);
+  console.log('Aligned budget codes:', Object.keys(alignedBudget).slice(0, 5), `(${Object.keys(alignedBudget).length} total)`);
+
   const alignedCostCodeNames = alignCostCodeNames(budgetNames, actualTotals);
   const allCodes = new Set([
     ...Object.keys(alignedBudget || {}),
     ...Object.keys(actualTotals || {})
   ]);
+
+  console.log('All codes after merge:', Array.from(allCodes).slice(0, 5), `(${allCodes.size} total)`);
 
   const comparison = Array.from(allCodes).map(code => {
     const budget = alignedBudget?.[code] || 0;
@@ -152,6 +160,14 @@ async function buildBudgetComparison(projectId, latestBudget = null) {
       variance_percent: variancePercent
     };
   }).sort((a, b) => a.cost_code.localeCompare(b.cost_code));
+
+  // Log sample comparison rows
+  console.log('Sample comparison rows:', comparison.slice(0, 3).map(r => ({
+    code: r.cost_code,
+    budget: r.budget_hours,
+    actual: r.actual_hours
+  })));
+  console.log('===\n');
 
   return { comparison, latestBudget: budgetUploads[0] || null, budgetUploads, costCodeNames: alignedCostCodeNames };
 }
