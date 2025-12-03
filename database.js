@@ -7,12 +7,23 @@ const UPLOADS_FILE = path.join(DATA_DIR, 'uploads.json');
 const ENTRIES_FILE = path.join(DATA_DIR, 'entries.json');
 const BUDGETS_FILE = path.join(DATA_DIR, 'budgets.json');
 const AREAS_FILE = path.join(DATA_DIR, 'areas.json');
+const CODE_MAPPINGS_FILE = path.join(DATA_DIR, 'code_mappings.json');
 
 function normalizeCostCode(value) {
   if (value === undefined || value === null) return null;
   const [mainPart] = value.toString().split('.');
   // Keep hyphen, remove other non-digit characters
   let normalized = mainPart.replace(/[^\d-]/g, '').trim();
+
+  // If no hyphen and exactly 4 digits, might be missing leading zero from Excel number formatting
+  // E.g., "1200" should be "01-200" not "12-00"
+  // But "10240" (5 digits) should stay "10-240" not become "01-0240"
+  if (normalized && !normalized.includes('-') && normalized.length === 4) {
+    // If first digit is 1-9 (not 0), likely missing leading zero
+    if (normalized[0] !== '0') {
+      normalized = '0' + normalized;
+    }
+  }
 
   // If no hyphen and 4+ digits, insert hyphen after first 2 digits (CSI MasterFormat)
   if (normalized && !normalized.includes('-') && normalized.length >= 4) {
@@ -51,6 +62,10 @@ function initDatabase() {
 
   if (!fs.existsSync(AREAS_FILE)) {
     fs.writeFileSync(AREAS_FILE, JSON.stringify([]));
+  }
+
+  if (!fs.existsSync(CODE_MAPPINGS_FILE)) {
+    fs.writeFileSync(CODE_MAPPINGS_FILE, JSON.stringify([]));
   }
 
   console.log('Database initialized successfully');
@@ -531,6 +546,45 @@ const comparisonQueries = {
   }
 };
 
+const codeMappingQueries = {
+  getByProject: async (project_id) => {
+    const mappings = readJSON(CODE_MAPPINGS_FILE);
+    return mappings.find(m => m.project_id === parseInt(project_id)) || {
+      project_id: parseInt(project_id),
+      mappings: {}
+    };
+  },
+
+  saveMappings: async (project_id, mappings = {}) => {
+    const allMappings = readJSON(CODE_MAPPINGS_FILE);
+    const index = allMappings.findIndex(m => m.project_id === parseInt(project_id));
+
+    const record = {
+      project_id: parseInt(project_id),
+      mappings: { ...mappings }
+    };
+
+    if (index !== -1) {
+      allMappings[index] = record;
+    } else {
+      allMappings.push(record);
+    }
+
+    writeJSON(CODE_MAPPINGS_FILE, allMappings);
+    return record;
+  },
+
+  deleteMapping: async (project_id, budgetCode) => {
+    const allMappings = readJSON(CODE_MAPPINGS_FILE);
+    const index = allMappings.findIndex(m => m.project_id === parseInt(project_id));
+
+    if (index !== -1) {
+      delete allMappings[index].mappings[budgetCode];
+      writeJSON(CODE_MAPPINGS_FILE, allMappings);
+    }
+  }
+};
+
 module.exports = {
   initDatabase,
   projectQueries,
@@ -538,5 +592,6 @@ module.exports = {
   budgetQueries,
   timeEntryQueries,
   comparisonQueries,
-  areaQueries
+  areaQueries,
+  codeMappingQueries
 };

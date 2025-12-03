@@ -4,14 +4,15 @@ const path = require('path');
 const fs = require('fs');
 const cors = require('cors');
 
-const { 
+const {
   initDatabase,
   projectQueries,
   uploadQueries,
   budgetQueries,
   timeEntryQueries,
   comparisonQueries,
-  areaQueries
+  areaQueries,
+  codeMappingQueries
 } = require('./database');
 
 const { parsePayrollPDF } = require('./pdfParser');
@@ -37,6 +38,16 @@ function normalizeCostCode(value) {
   const [mainPart] = value.toString().split('.');
   // Keep hyphen, remove other non-digit characters
   let normalized = mainPart.replace(/[^\d-]/g, '').trim();
+
+  // If no hyphen and exactly 4 digits, might be missing leading zero from Excel number formatting
+  // E.g., "1200" should be "01-200" not "12-00"
+  // But "10240" (5 digits) should stay "10-240" not become "01-0240"
+  if (normalized && !normalized.includes('-') && normalized.length === 4) {
+    // If first digit is 1-9 (not 0), likely missing leading zero
+    if (normalized[0] !== '0') {
+      normalized = '0' + normalized;
+    }
+  }
 
   // If no hyphen and 4+ digits, insert hyphen after first 2 digits (CSI MasterFormat)
   if (normalized && !normalized.includes('-') && normalized.length >= 4) {
@@ -71,16 +82,31 @@ function normalizeForComparison(code) {
 }
 
 // Align budget codes to payroll codes by matching on numeric prefixes
-function alignBudgetCostCodes(budgetHours = {}, actualTotals = {}) {
+function alignBudgetCostCodes(budgetHours = {}, actualTotals = {}, savedMappings = {}) {
   const actualCodes = Object.keys(actualTotals || {});
   const aligned = {};
+  let matchCount = 0;
+  let mismatchCount = 0;
 
   Object.entries(budgetHours || {}).forEach(([budgetCode, hours]) => {
     if (!budgetCode) return;
 
-    // Try to find an exact match first
+    // Try saved manual mapping first
+    if (savedMappings[budgetCode]) {
+      const mappedCode = savedMappings[budgetCode];
+      if (actualCodes.includes(mappedCode)) {
+        aligned[mappedCode] = (aligned[mappedCode] || 0) + hours;
+        matchCount++;
+        console.log(`✓ Manual mapping: budget "${budgetCode}" → actual "${mappedCode}"`);
+        return;
+      }
+    }
+
+    // Try to find an exact match
     if (actualCodes.includes(budgetCode)) {
       aligned[budgetCode] = (aligned[budgetCode] || 0) + hours;
+      matchCount++;
+      console.log(`✓ Exact match: budget "${budgetCode}" = actual "${budgetCode}"`);
       return;
     }
 
@@ -90,20 +116,38 @@ function alignBudgetCostCodes(budgetHours = {}, actualTotals = {}) {
       normalizeForComparison(code) === budgetNormalized
     );
 
-    // If still no match and budget code starts with "1-" through "9-",
-    // try adding a leading zero (handles Excel number formatting that strips leading zeros)
-    if (!matchingActual && /^[1-9]-/.test(budgetCode)) {
+    if (matchingActual) {
+      aligned[matchingActual] = (aligned[matchingActual] || 0) + hours;
+      matchCount++;
+      console.log(`✓ Normalized match: budget "${budgetCode}" (norm: "${budgetNormalized}") = actual "${matchingActual}"`);
+      return;
+    }
+
+    // If still no match, try adding a leading zero as a last resort
+    // (handles Excel number formatting that strips leading zeros: "12-000" -> "012-000")
+    if (!matchingActual && budgetCode.length > 0 && budgetCode[0] !== '0') {
       const withLeadingZero = '0' + budgetCode;
       const withLeadingZeroNormalized = normalizeForComparison(withLeadingZero);
       matchingActual = actualCodes.find(code =>
         normalizeForComparison(code) === withLeadingZeroNormalized
       );
+
+      if (matchingActual) {
+        aligned[matchingActual] = (aligned[matchingActual] || 0) + hours;
+        matchCount++;
+        console.log(`✓ Leading zero match: budget "${budgetCode}" → "${withLeadingZero}" (norm: "${withLeadingZeroNormalized}") = actual "${matchingActual}"`);
+        return;
+      }
     }
 
+    // No match found - use budget code as-is
     const targetCode = matchingActual || budgetCode;
     aligned[targetCode] = (aligned[targetCode] || 0) + hours;
+    mismatchCount++;
+    console.log(`✗ No match: budget "${budgetCode}" (norm: "${budgetNormalized}") - keeping as-is`);
   });
 
+  console.log(`\n📊 Alignment summary: ${matchCount} matched, ${mismatchCount} unmatched\n`);
   return aligned;
 }
 
@@ -128,8 +172,8 @@ function alignCostCodeNames(budgetNames = {}, actualTotals = {}) {
       normalizeForComparison(code) === budgetNormalized
     );
 
-    // If still no match and budget code starts with "1-" through "9-", try adding a leading zero
-    if (!matchingActual && /^[1-9]-/.test(budgetCode)) {
+    // If still no match, try adding a leading zero as a last resort
+    if (!matchingActual && budgetCode.length > 0 && budgetCode[0] !== '0') {
       const withLeadingZero = '0' + budgetCode;
       const withLeadingZeroNormalized = normalizeForComparison(withLeadingZero);
       matchingActual = actualCodes.find(code =>
@@ -147,9 +191,10 @@ function alignCostCodeNames(budgetNames = {}, actualTotals = {}) {
 }
 
 async function buildBudgetComparison(projectId, latestBudget = null) {
-  const [budgetUploads, actualTotals] = await Promise.all([
+  const [budgetUploads, actualTotals, savedMappings] = await Promise.all([
     budgetQueries.getByProject(projectId),
-    timeEntryQueries.getCostCodeTotals(projectId)
+    timeEntryQueries.getCostCodeTotals(projectId),
+    codeMappingQueries.getByProject(projectId)
   ]);
 
   const budgetHours = latestBudget ? latestBudget.cost_code_hours : (budgetUploads[0]?.cost_code_hours || {});
@@ -158,8 +203,9 @@ async function buildBudgetComparison(projectId, latestBudget = null) {
   console.log(`\n=== Building Budget Comparison for Project ${projectId} ===`);
   console.log('Budget codes:', Object.keys(budgetHours).slice(0, 5), `(${Object.keys(budgetHours).length} total)`);
   console.log('Actual codes:', Object.keys(actualTotals).slice(0, 5), `(${Object.keys(actualTotals).length} total)`);
+  console.log('Saved mappings:', Object.keys(savedMappings.mappings || {}).length, 'custom mappings');
 
-  const alignedBudget = alignBudgetCostCodes(budgetHours, actualTotals);
+  const alignedBudget = alignBudgetCostCodes(budgetHours, actualTotals, savedMappings.mappings || {});
   console.log('Aligned budget codes:', Object.keys(alignedBudget).slice(0, 5), `(${Object.keys(alignedBudget).length} total)`);
 
   const alignedCostCodeNames = alignCostCodeNames(budgetNames, actualTotals);
@@ -770,6 +816,55 @@ app.get('/project/:id', (req, res) => {
 
 app.get('/comparison', (req, res) => {
   res.sendFile(path.join(__dirname, 'public', 'comparison.html'));
+});
+
+// Get code mappings for a project
+app.get('/api/projects/:id/code-mappings', async (req, res) => {
+  try {
+    const mappings = await codeMappingQueries.getByProject(req.params.id);
+    res.json(mappings);
+  } catch (error) {
+    console.error('Error fetching code mappings:', error);
+    res.status(500).json({ error: 'Failed to fetch code mappings' });
+  }
+});
+
+// Save code mappings for a project
+app.post('/api/projects/:id/code-mappings', async (req, res) => {
+  try {
+    const { budgetCode, actualCode, mappings } = req.body;
+
+    // Get current mappings
+    const current = await codeMappingQueries.getByProject(req.params.id);
+
+    // If adding a single mapping, merge with existing
+    let updatedMappings = current.mappings || {};
+    if (budgetCode && actualCode) {
+      updatedMappings[budgetCode] = actualCode;
+    } else if (mappings) {
+      // If replacing all mappings
+      updatedMappings = mappings;
+    }
+
+    await codeMappingQueries.saveMappings(req.params.id, updatedMappings);
+    const updated = await codeMappingQueries.getByProject(req.params.id);
+    res.json(updated);
+  } catch (error) {
+    console.error('Error saving code mappings:', error);
+    res.status(500).json({ error: 'Failed to save code mappings' });
+  }
+});
+
+// Delete a specific code mapping
+app.delete('/api/projects/:id/code-mappings/:budgetCode', async (req, res) => {
+  try {
+    await codeMappingQueries.deleteMapping(req.params.id, req.params.budgetCode);
+    const updated = await codeMappingQueries.getByProject(req.params.id);
+    res.json(updated);
+  } catch (error) {
+    console.error('Error deleting code mapping:', error);
+    res.status(500).json({ error: 'Failed to delete code mapping' });
+  }
 });
 
 // Debug endpoint to check stored cost codes

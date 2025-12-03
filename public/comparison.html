@@ -128,7 +128,12 @@
               <h3 class="card-title">Cost Code Variance</h3>
               <div style="color: var(--text-secondary); font-size: 0.9rem;">Spent vs. budgeted hours by cost code</div>
             </div>
-            <div style="color: var(--text-secondary); font-size: 0.9rem;">Respects cost code filters</div>
+            <div style="display: flex; gap: 1rem; align-items: center;">
+              <button class="btn btn-secondary" onclick="openCodeMappingModal()" style="font-size: 0.875rem;">
+                Manage Code Mappings
+              </button>
+              <div style="color: var(--text-secondary); font-size: 0.9rem;">Respects cost code filters</div>
+            </div>
           </div>
           <div id="costCodeVarianceTable"></div>
         </div>
@@ -147,6 +152,26 @@
           <h3>Select Projects to Compare</h3>
           <p>Choose 2 or more projects from the list to see comparative analysis</p>
         </div>
+      </div>
+    </div>
+  </div>
+
+  <!-- Code Mapping Modal -->
+  <div id="codeMappingModal" class="modal" style="display: none;">
+    <div class="modal-content" style="max-width: 900px; max-height: 80vh; overflow-y: auto;">
+      <div class="modal-header">
+        <h3>Manage Cost Code Mappings</h3>
+        <button class="modal-close" onclick="closeCodeMappingModal()">&times;</button>
+      </div>
+      <div class="modal-body">
+        <p style="color: var(--text-secondary); margin-bottom: 1.5rem;">
+          Manually map budget codes to actual payroll codes. These mappings are saved per project and will be used in future comparisons.
+        </p>
+
+        <div id="codeMappingProjects"></div>
+      </div>
+      <div class="modal-footer">
+        <button class="btn btn-secondary" onclick="closeCodeMappingModal()">Close</button>
       </div>
     </div>
   </div>
@@ -1293,6 +1318,216 @@
       const div = document.createElement('div');
       div.textContent = text;
       return div.innerHTML;
+    }
+
+    // Code Mapping Modal Functions
+    async function openCodeMappingModal() {
+      if (!comparisonData || !comparisonData.length) {
+        alert('Please load comparison data first');
+        return;
+      }
+
+      const modal = document.getElementById('codeMappingModal');
+      modal.style.display = 'flex';
+
+      await loadCodeMappings();
+    }
+
+    function closeCodeMappingModal() {
+      const modal = document.getElementById('codeMappingModal');
+      modal.style.display = 'none';
+    }
+
+    async function loadCodeMappings() {
+      const container = document.getElementById('codeMappingProjects');
+      container.innerHTML = '<p style="text-align: center; padding: 2rem;">Loading mappings...</p>';
+
+      try {
+        // Load mappings for each project
+        const projectMappings = await Promise.all(
+          comparisonData.map(async project => {
+            const response = await fetch(`/api/projects/${project.projectId}/code-mappings`);
+            const data = response.ok ? await response.json() : { mappings: {} };
+            return { project, mappings: data.mappings || {} };
+          })
+        );
+
+        renderCodeMappings(projectMappings);
+      } catch (error) {
+        console.error('Error loading code mappings:', error);
+        container.innerHTML = '<p style="color: var(--danger-color); text-align: center;">Error loading mappings</p>';
+      }
+    }
+
+    function renderCodeMappings(projectMappings) {
+      const container = document.getElementById('codeMappingProjects');
+
+      container.innerHTML = projectMappings.map(({ project, mappings }) => {
+        const projectName = project.data[0]?.project_name || `Project ${project.projectId}`;
+
+        // Get all budget codes and actual codes for this project
+        const budgetCodes = new Set();
+        const actualCodes = new Set();
+
+        (project.budgetComparison || []).forEach(row => {
+          if (row.cost_code) budgetCodes.add(row.cost_code);
+          if (row.actual_hours > 0 && row.cost_code) actualCodes.add(row.cost_code);
+        });
+
+        // Get actual codes from the raw data as well
+        (project.data || []).forEach(entry => {
+          if (entry.cost_code) actualCodes.add(entry.cost_code);
+        });
+
+        const sortedBudgetCodes = Array.from(budgetCodes).sort();
+        const sortedActualCodes = Array.from(actualCodes).sort();
+
+        return `
+          <div class="card" style="margin-bottom: 1.5rem; background-color: var(--background);">
+            <h4 style="margin-bottom: 1rem;">${escapeHtml(projectName)}</h4>
+
+            ${Object.keys(mappings).length > 0 ? `
+              <div style="margin-bottom: 1.5rem;">
+                <h5 style="font-size: 0.875rem; font-weight: 600; margin-bottom: 0.5rem; color: var(--text-secondary);">
+                  Current Mappings
+                </h5>
+                <div style="display: grid; gap: 0.5rem;">
+                  ${Object.entries(mappings).map(([budgetCode, actualCode]) => `
+                    <div style="display: flex; align-items: center; gap: 1rem; padding: 0.5rem; background: var(--card-background); border-radius: 4px;">
+                      <span style="font-family: monospace; font-weight: 600;">${escapeHtml(budgetCode)}</span>
+                      <span style="color: var(--text-secondary);">→</span>
+                      <span style="font-family: monospace; flex: 1;">${escapeHtml(actualCode)}</span>
+                      <button
+                        class="btn btn-danger"
+                        style="font-size: 0.75rem; padding: 0.25rem 0.5rem;"
+                        onclick="deleteCodeMapping(${project.projectId}, '${budgetCode}')"
+                      >
+                        Delete
+                      </button>
+                    </div>
+                  `).join('')}
+                </div>
+              </div>
+            ` : ''}
+
+            <div>
+              <h5 style="font-size: 0.875rem; font-weight: 600; margin-bottom: 0.5rem; color: var(--text-secondary);">
+                Add New Mapping
+              </h5>
+              <div style="display: grid; grid-template-columns: 1fr auto 1fr auto; gap: 0.75rem; align-items: center;">
+                <div>
+                  <label style="display: block; font-size: 0.75rem; margin-bottom: 0.25rem; color: var(--text-secondary);">
+                    Budget Code
+                  </label>
+                  <select
+                    id="budgetCode_${project.projectId}"
+                    class="form-control"
+                    style="width: 100%; font-family: monospace;"
+                  >
+                    <option value="">Select budget code...</option>
+                    ${sortedBudgetCodes.map(code => `
+                      <option value="${escapeHtml(code)}">${escapeHtml(code)}</option>
+                    `).join('')}
+                  </select>
+                </div>
+
+                <span style="color: var(--text-secondary); margin-top: 1.25rem;">→</span>
+
+                <div>
+                  <label style="display: block; font-size: 0.75rem; margin-bottom: 0.25rem; color: var(--text-secondary);">
+                    Actual Code
+                  </label>
+                  <select
+                    id="actualCode_${project.projectId}"
+                    class="form-control"
+                    style="width: 100%; font-family: monospace;"
+                  >
+                    <option value="">Select actual code...</option>
+                    ${sortedActualCodes.map(code => `
+                      <option value="${escapeHtml(code)}">${escapeHtml(code)}</option>
+                    `).join('')}
+                  </select>
+                </div>
+
+                <button
+                  class="btn btn-primary"
+                  style="margin-top: 1.25rem;"
+                  onclick="saveCodeMapping(${project.projectId})"
+                >
+                  Add Mapping
+                </button>
+              </div>
+            </div>
+          </div>
+        `;
+      }).join('');
+    }
+
+    async function saveCodeMapping(projectId) {
+      const budgetCodeSelect = document.getElementById(`budgetCode_${projectId}`);
+      const actualCodeSelect = document.getElementById(`actualCode_${projectId}`);
+
+      const budgetCode = budgetCodeSelect.value;
+      const actualCode = actualCodeSelect.value;
+
+      if (!budgetCode || !actualCode) {
+        alert('Please select both a budget code and an actual code');
+        return;
+      }
+
+      try {
+        const response = await fetch(`/api/projects/${projectId}/code-mappings`, {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ budgetCode, actualCode })
+        });
+
+        if (!response.ok) {
+          throw new Error('Failed to save mapping');
+        }
+
+        // Reload mappings and refresh the comparison
+        await loadCodeMappings();
+        await loadComparison();
+
+        // Reset selects
+        budgetCodeSelect.value = '';
+        actualCodeSelect.value = '';
+      } catch (error) {
+        console.error('Error saving code mapping:', error);
+        alert('Error saving mapping. Please try again.');
+      }
+    }
+
+    async function deleteCodeMapping(projectId, budgetCode) {
+      if (!confirm(`Delete mapping for budget code "${budgetCode}"?`)) {
+        return;
+      }
+
+      try {
+        const response = await fetch(`/api/projects/${projectId}/code-mappings/${encodeURIComponent(budgetCode)}`, {
+          method: 'DELETE'
+        });
+
+        if (!response.ok) {
+          throw new Error('Failed to delete mapping');
+        }
+
+        // Reload mappings and refresh the comparison
+        await loadCodeMappings();
+        await loadComparison();
+      } catch (error) {
+        console.error('Error deleting code mapping:', error);
+        alert('Error deleting mapping. Please try again.');
+      }
+    }
+
+    // Close modal when clicking outside
+    window.onclick = function(event) {
+      const modal = document.getElementById('codeMappingModal');
+      if (event.target === modal) {
+        closeCodeMappingModal();
+      }
     }
   </script>
 </body>
