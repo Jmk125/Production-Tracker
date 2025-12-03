@@ -45,35 +45,36 @@
         <div class="card" style="margin-bottom: 1.5rem;">
             <div class="card-header">
               <h3 class="card-title">Timeline Comparison</h3>
-              <div style="display: flex; gap: 1rem; flex-wrap: wrap; justify-content: flex-end;">
-              <select id="timelineType" onchange="updateCharts()">
-                <option value="project">Project Timeline (Month 1, 2, 3...)</option>
-                <option value="calendar">Calendar Timeline</option>
-              </select>
-              <select id="comparisonView" onchange="updateCharts()">
-                <option value="total">Total Hours</option>
-                <option value="costCode">By Cost Code</option>
-                <option value="costCodeDivision">By Cost Code Division</option>
-                <option value="payClass">By Pay Class</option>
-                <option value="job">By Job/Building</option>
-                <option value="division09">09 Package (Division 09 only)</option>
-                <option value="package06Combo">06 Package (Div 06, 08, 10, 11, 12)</option>
-                <option value="packageComparison">Packages: 09 vs 06/08/10/11/12</option>
-              </select>
-              <div style="display: flex; gap: 0.75rem; align-items: center; flex-wrap: wrap;">
-                <label class="checkbox" style="margin: 0;">
-                  <input type="checkbox" id="showAverageCurvesToggle" onchange="updateCharts()">
-                  Show average curves
-                </label>
-                <select id="averageCurveMode" onchange="updateCharts()">
-                  <option value="actual">Show actual only</option>
-                  <option value="average">Average curves</option>
-                  <option value="overlay" selected>Actual with average overlay</option>
+              <div style="display: flex; gap: 1rem; flex-wrap: wrap; justify-content: flex-end; align-items: center;">
+                <select id="timelineType" onchange="updateCharts()">
+                  <option value="project">Project Timeline (Month 1, 2, 3...)</option>
+                  <option value="calendar">Calendar Timeline</option>
                 </select>
-                <label class="checkbox" style="margin: 0;">
-                  <input type="checkbox" id="combinedAverageToggle" checked onchange="updateCharts()">
-                  Include combined average
-                </label>
+                <select id="comparisonView" onchange="updateCharts()">
+                  <option value="total">Total Hours</option>
+                  <option value="costCode">By Cost Code</option>
+                  <option value="costCodeDivision">By Cost Code Division</option>
+                  <option value="payClass">By Pay Class</option>
+                  <option value="job">By Job/Building</option>
+                  <option value="division09">09 Package (Division 09 only)</option>
+                  <option value="package06Combo">06 Package (Div 06, 08, 10, 11, 12)</option>
+                  <option value="packageComparison">Packages: 09 vs 06/08/10/11/12</option>
+                </select>
+                <div class="chart-controls" style="display: flex; gap: 0.75rem; align-items: center; flex-wrap: wrap;">
+                  <label class="checkbox" style="margin: 0;">
+                    <input type="checkbox" id="showAverageCurvesToggle" onchange="updateCharts()">
+                    Show average curves
+                  </label>
+                  <select id="averageCurveMode" onchange="updateCharts()">
+                    <option value="actual">Show actual only</option>
+                    <option value="average">Average curves</option>
+                    <option value="overlay" selected>Actual with average overlay</option>
+                  </select>
+                  <label class="checkbox" style="margin: 0;">
+                    <input type="checkbox" id="combinedAverageToggle" checked onchange="updateCharts()">
+                    Include combined average
+                  </label>
+                </div>
               </div>
             </div>
           </div>
@@ -132,10 +133,18 @@
               <h3 class="card-title">Cost Code Variance</h3>
               <div style="color: var(--text-secondary); font-size: 0.9rem;">Spent vs. budgeted hours by cost code</div>
             </div>
-            <div style="display: flex; gap: 1rem; align-items: center;">
+            <div style="display: flex; gap: 1rem; align-items: center; flex-wrap: wrap; justify-content: flex-end;">
               <button class="btn btn-secondary" onclick="openCodeMappingModal()" style="font-size: 0.875rem;">
                 Manage Code Mappings
               </button>
+              <label class="checkbox" style="margin: 0; display: flex; align-items: center; gap: 0.35rem;">
+                <input type="checkbox" id="showVarianceAverageBar" onchange="renderCostCodeVarianceChart(getFilteredComparisonData())">
+                Show average bar
+              </label>
+              <label class="checkbox" style="margin: 0; display: flex; align-items: center; gap: 0.35rem;">
+                <input type="checkbox" id="varianceAverageOnlyToggle" onchange="renderCostCodeVarianceChart(getFilteredComparisonData())" disabled>
+                Average only
+              </label>
               <div style="color: var(--text-secondary); font-size: 0.9rem;">Respects cost code filters</div>
             </div>
           </div>
@@ -898,9 +907,47 @@
       };
     }
 
+    function buildVarianceAverageDataset(datasets = [], labels = []) {
+      const totals = labels.map(() => 0);
+      const counts = labels.map(() => 0);
+
+      datasets.forEach(dataset => {
+        (dataset.data || []).forEach((value, index) => {
+          if (Number.isFinite(value)) {
+            totals[index] += value;
+            counts[index] += 1;
+          }
+        });
+      });
+
+      const averages = totals.map((sum, index) => counts[index]
+        ? Number((sum / counts[index]).toFixed(2))
+        : 0
+      );
+
+      return {
+        label: 'All Projects Average',
+        data: averages,
+        backgroundColor: 'rgba(16, 24, 40, 0.78)',
+        borderColor: 'rgba(16, 24, 40, 0.95)',
+        borderWidth: 2,
+        costCodeRows: null,
+        isAverageBar: true
+      };
+    }
+
     function renderCostCodeVarianceChart(data = comparisonData) {
       const container = document.getElementById('costCodeVarianceTable');
       const card = document.getElementById('costCodeVarianceCard');
+      const showAverageBar = document.getElementById('showVarianceAverageBar')?.checked;
+      const averageOnlyToggle = document.getElementById('varianceAverageOnlyToggle');
+      const averageOnly = !!showAverageBar && !!averageOnlyToggle?.checked;
+
+      if (averageOnlyToggle) {
+        averageOnlyToggle.disabled = !showAverageBar;
+        if (!showAverageBar) averageOnlyToggle.checked = false;
+      }
+
       if (!container || !card) return;
 
       if (costCodeVarianceChart) {
@@ -933,7 +980,7 @@
       }
 
       const sortedCodes = Array.from(costCodes).sort();
-      const datasets = data.map((project, index) => {
+      const projectDatasets = data.map((project, index) => {
         const color = getColor(index);
         const rowsByCode = {};
 
@@ -954,6 +1001,16 @@
           costCodeRows: rowsByCode
         };
       });
+
+      const averageDataset = showAverageBar
+        ? buildVarianceAverageDataset(projectDatasets, sortedCodes)
+        : null;
+
+      const datasets = averageOnly && averageDataset
+        ? [averageDataset]
+        : averageDataset
+          ? [...projectDatasets, averageDataset]
+          : projectDatasets;
 
       const allValues = datasets.flatMap(ds => ds.data.filter(v => Number.isFinite(v)));
       const suggestedMin = allValues.length ? Math.min(0, Math.min(...allValues) * 1.1) : 0;
@@ -987,6 +1044,10 @@
                   const varianceLabel = Number.isFinite(varianceHours)
                     ? varianceHours.toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })
                     : '—';
+
+                  if (context.dataset.isAverageBar) {
+                    return `${context.dataset.label} – ${costCodeLabel}: ${varianceLabel} hrs`;
+                  }
 
                   if (!row) return `${context.dataset.label}: ${varianceLabel} hrs`;
 
