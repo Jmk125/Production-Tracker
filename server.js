@@ -151,12 +151,22 @@ function alignBudgetCostCodes(budgetHours = {}, actualTotals = {}, savedMappings
   return aligned;
 }
 
-function alignCostCodeNames(budgetNames = {}, actualTotals = {}) {
+function alignCostCodeNames(budgetNames = {}, actualTotals = {}, mappings = {}) {
   const actualCodes = Object.keys(actualTotals || {});
   const aligned = {};
+  const mappingLookup = mappings || {};
 
   Object.entries(budgetNames || {}).forEach(([budgetCode, name]) => {
     if (!budgetCode || !name) return;
+
+    // If there's an explicit mapping, always use it for the label
+    const mappedActual = mappingLookup[budgetCode];
+    if (mappedActual) {
+      if (!aligned[mappedActual]) {
+        aligned[mappedActual] = name;
+      }
+      return;
+    }
 
     // Try to find an exact match first
     if (actualCodes.includes(budgetCode)) {
@@ -208,7 +218,7 @@ async function buildBudgetComparison(projectId, latestBudget = null) {
   const alignedBudget = alignBudgetCostCodes(budgetHours, actualTotals, savedMappings.mappings || {});
   console.log('Aligned budget codes:', Object.keys(alignedBudget).slice(0, 5), `(${Object.keys(alignedBudget).length} total)`);
 
-  const alignedCostCodeNames = alignCostCodeNames(budgetNames, actualTotals);
+  const alignedCostCodeNames = alignCostCodeNames(budgetNames, actualTotals, savedMappings.mappings || {});
   const allCodes = new Set([
     ...Object.keys(alignedBudget || {}),
     ...Object.keys(actualTotals || {})
