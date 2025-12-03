@@ -30,12 +30,13 @@ if (!fs.existsSync(uploadsDir)) {
   fs.mkdirSync(uploadsDir);
 }
 
-// Normalize cost codes to numeric-only strings (drops decimals)
+// Normalize cost codes: keep hyphen, remove other non-digits (except hyphen)
 function normalizeCostCode(value) {
   if (value === undefined || value === null) return null;
   const [mainPart] = value.toString().split('.');
-  const numeric = mainPart.replace(/\D/g, '').trim();
-  return numeric || null;
+  // Keep hyphen, remove other non-digit characters
+  const normalized = mainPart.replace(/[^\d-]/g, '').trim();
+  return normalized || null;
 }
 
 function normalizeJobLabel(value) {
@@ -46,8 +47,19 @@ function normalizeJobLabel(value) {
 // Normalize cost code by removing trailing zeros for comparison
 function normalizeForComparison(code) {
   if (!code) return '';
-  // Remove trailing zeros, then parse as integer to handle leading zeros
-  const withoutTrailing = code.toString().replace(/0+$/, '');
+  const str = code.toString();
+
+  // If code has hyphen (e.g., "01-400"), handle each part separately
+  if (str.includes('-')) {
+    const [division, spec] = str.split('-');
+    // Remove leading zeros from division, trailing zeros from spec
+    const divNormalized = parseInt(division, 10).toString();
+    const specNormalized = spec.replace(/0+$/, '') || '0';
+    return `${divNormalized}-${specNormalized}`;
+  }
+
+  // No hyphen: remove trailing zeros only
+  const withoutTrailing = str.replace(/0+$/, '');
   return withoutTrailing || '0';
 }
 
