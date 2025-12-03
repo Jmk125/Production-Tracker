@@ -74,6 +74,8 @@ function normalizeForComparison(code) {
 function alignBudgetCostCodes(budgetHours = {}, actualTotals = {}) {
   const actualCodes = Object.keys(actualTotals || {});
   const aligned = {};
+  let matchCount = 0;
+  let mismatchCount = 0;
 
   Object.entries(budgetHours || {}).forEach(([budgetCode, hours]) => {
     if (!budgetCode) return;
@@ -81,6 +83,8 @@ function alignBudgetCostCodes(budgetHours = {}, actualTotals = {}) {
     // Try to find an exact match first
     if (actualCodes.includes(budgetCode)) {
       aligned[budgetCode] = (aligned[budgetCode] || 0) + hours;
+      matchCount++;
+      console.log(`✓ Exact match: budget "${budgetCode}" = actual "${budgetCode}"`);
       return;
     }
 
@@ -90,6 +94,13 @@ function alignBudgetCostCodes(budgetHours = {}, actualTotals = {}) {
       normalizeForComparison(code) === budgetNormalized
     );
 
+    if (matchingActual) {
+      aligned[matchingActual] = (aligned[matchingActual] || 0) + hours;
+      matchCount++;
+      console.log(`✓ Normalized match: budget "${budgetCode}" (norm: "${budgetNormalized}") = actual "${matchingActual}"`);
+      return;
+    }
+
     // If still no match, try adding a leading zero as a last resort
     // (handles Excel number formatting that strips leading zeros: "12-000" -> "012-000")
     if (!matchingActual && budgetCode.length > 0 && budgetCode[0] !== '0') {
@@ -98,12 +109,23 @@ function alignBudgetCostCodes(budgetHours = {}, actualTotals = {}) {
       matchingActual = actualCodes.find(code =>
         normalizeForComparison(code) === withLeadingZeroNormalized
       );
+
+      if (matchingActual) {
+        aligned[matchingActual] = (aligned[matchingActual] || 0) + hours;
+        matchCount++;
+        console.log(`✓ Leading zero match: budget "${budgetCode}" → "${withLeadingZero}" (norm: "${withLeadingZeroNormalized}") = actual "${matchingActual}"`);
+        return;
+      }
     }
 
+    // No match found - use budget code as-is
     const targetCode = matchingActual || budgetCode;
     aligned[targetCode] = (aligned[targetCode] || 0) + hours;
+    mismatchCount++;
+    console.log(`✗ No match: budget "${budgetCode}" (norm: "${budgetNormalized}") - keeping as-is`);
   });
 
+  console.log(`\n📊 Alignment summary: ${matchCount} matched, ${mismatchCount} unmatched\n`);
   return aligned;
 }
 
