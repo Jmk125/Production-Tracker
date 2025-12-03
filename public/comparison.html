@@ -1347,8 +1347,8 @@
         const projectMappings = await Promise.all(
           comparisonData.map(async project => {
             const response = await fetch(`/api/projects/${project.projectId}/code-mappings`);
-            const mappings = response.ok ? await response.json() : {};
-            return { project, mappings };
+            const data = response.ok ? await response.json() : { mappings: {} };
+            return { project, mappings: data.mappings || {} };
           })
         );
 

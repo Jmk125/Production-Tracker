@@ -7,6 +7,7 @@ const UPLOADS_FILE = path.join(DATA_DIR, 'uploads.json');
 const ENTRIES_FILE = path.join(DATA_DIR, 'entries.json');
 const BUDGETS_FILE = path.join(DATA_DIR, 'budgets.json');
 const AREAS_FILE = path.join(DATA_DIR, 'areas.json');
+const CODE_MAPPINGS_FILE = path.join(DATA_DIR, 'code_mappings.json');
 
 function normalizeCostCode(value) {
   if (value === undefined || value === null) return null;
@@ -61,6 +62,10 @@ function initDatabase() {
 
   if (!fs.existsSync(AREAS_FILE)) {
     fs.writeFileSync(AREAS_FILE, JSON.stringify([]));
+  }
+
+  if (!fs.existsSync(CODE_MAPPINGS_FILE)) {
+    fs.writeFileSync(CODE_MAPPINGS_FILE, JSON.stringify([]));
   }
 
   console.log('Database initialized successfully');
@@ -541,6 +546,45 @@ const comparisonQueries = {
   }
 };
 
+const codeMappingQueries = {
+  getByProject: async (project_id) => {
+    const mappings = readJSON(CODE_MAPPINGS_FILE);
+    return mappings.find(m => m.project_id === parseInt(project_id)) || {
+      project_id: parseInt(project_id),
+      mappings: {}
+    };
+  },
+
+  saveMappings: async (project_id, mappings = {}) => {
+    const allMappings = readJSON(CODE_MAPPINGS_FILE);
+    const index = allMappings.findIndex(m => m.project_id === parseInt(project_id));
+
+    const record = {
+      project_id: parseInt(project_id),
+      mappings: { ...mappings }
+    };
+
+    if (index !== -1) {
+      allMappings[index] = record;
+    } else {
+      allMappings.push(record);
+    }
+
+    writeJSON(CODE_MAPPINGS_FILE, allMappings);
+    return record;
+  },
+
+  deleteMapping: async (project_id, budgetCode) => {
+    const allMappings = readJSON(CODE_MAPPINGS_FILE);
+    const index = allMappings.findIndex(m => m.project_id === parseInt(project_id));
+
+    if (index !== -1) {
+      delete allMappings[index].mappings[budgetCode];
+      writeJSON(CODE_MAPPINGS_FILE, allMappings);
+    }
+  }
+};
+
 module.exports = {
   initDatabase,
   projectQueries,
@@ -548,5 +592,6 @@ module.exports = {
   budgetQueries,
   timeEntryQueries,
   comparisonQueries,
-  areaQueries
+  areaQueries,
+  codeMappingQueries
 };

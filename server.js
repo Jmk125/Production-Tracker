@@ -4,14 +4,15 @@ const path = require('path');
 const fs = require('fs');
 const cors = require('cors');
 
-const { 
+const {
   initDatabase,
   projectQueries,
   uploadQueries,
   budgetQueries,
   timeEntryQueries,
   comparisonQueries,
-  areaQueries
+  areaQueries,
+  codeMappingQueries
 } = require('./database');
 
 const { parsePayrollPDF } = require('./pdfParser');
@@ -81,7 +82,7 @@ function normalizeForComparison(code) {
 }
 
 // Align budget codes to payroll codes by matching on numeric prefixes
-function alignBudgetCostCodes(budgetHours = {}, actualTotals = {}) {
+function alignBudgetCostCodes(budgetHours = {}, actualTotals = {}, savedMappings = {}) {
   const actualCodes = Object.keys(actualTotals || {});
   const aligned = {};
   let matchCount = 0;
@@ -90,7 +91,18 @@ function alignBudgetCostCodes(budgetHours = {}, actualTotals = {}) {
   Object.entries(budgetHours || {}).forEach(([budgetCode, hours]) => {
     if (!budgetCode) return;
 
-    // Try to find an exact match first
+    // Try saved manual mapping first
+    if (savedMappings[budgetCode]) {
+      const mappedCode = savedMappings[budgetCode];
+      if (actualCodes.includes(mappedCode)) {
+        aligned[mappedCode] = (aligned[mappedCode] || 0) + hours;
+        matchCount++;
+        console.log(`✓ Manual mapping: budget "${budgetCode}" → actual "${mappedCode}"`);
+        return;
+      }
+    }
+
+    // Try to find an exact match
     if (actualCodes.includes(budgetCode)) {
       aligned[budgetCode] = (aligned[budgetCode] || 0) + hours;
       matchCount++;
@@ -179,9 +191,10 @@ function alignCostCodeNames(budgetNames = {}, actualTotals = {}) {
 }
 
 async function buildBudgetComparison(projectId, latestBudget = null) {
-  const [budgetUploads, actualTotals] = await Promise.all([
+  const [budgetUploads, actualTotals, savedMappings] = await Promise.all([
     budgetQueries.getByProject(projectId),
-    timeEntryQueries.getCostCodeTotals(projectId)
+    timeEntryQueries.getCostCodeTotals(projectId),
+    codeMappingQueries.getByProject(projectId)
   ]);
 
   const budgetHours = latestBudget ? latestBudget.cost_code_hours : (budgetUploads[0]?.cost_code_hours || {});
@@ -190,8 +203,9 @@ async function buildBudgetComparison(projectId, latestBudget = null) {
   console.log(`\n=== Building Budget Comparison for Project ${projectId} ===`);
   console.log('Budget codes:', Object.keys(budgetHours).slice(0, 5), `(${Object.keys(budgetHours).length} total)`);
   console.log('Actual codes:', Object.keys(actualTotals).slice(0, 5), `(${Object.keys(actualTotals).length} total)`);
+  console.log('Saved mappings:', Object.keys(savedMappings.mappings || {}).length, 'custom mappings');
 
-  const alignedBudget = alignBudgetCostCodes(budgetHours, actualTotals);
+  const alignedBudget = alignBudgetCostCodes(budgetHours, actualTotals, savedMappings.mappings || {});
   console.log('Aligned budget codes:', Object.keys(alignedBudget).slice(0, 5), `(${Object.keys(alignedBudget).length} total)`);
 
   const alignedCostCodeNames = alignCostCodeNames(budgetNames, actualTotals);
@@ -802,6 +816,55 @@ app.get('/project/:id', (req, res) => {
 
 app.get('/comparison', (req, res) => {
   res.sendFile(path.join(__dirname, 'public', 'comparison.html'));
+});
+
+// Get code mappings for a project
+app.get('/api/projects/:id/code-mappings', async (req, res) => {
+  try {
+    const mappings = await codeMappingQueries.getByProject(req.params.id);
+    res.json(mappings);
+  } catch (error) {
+    console.error('Error fetching code mappings:', error);
+    res.status(500).json({ error: 'Failed to fetch code mappings' });
+  }
+});
+
+// Save code mappings for a project
+app.post('/api/projects/:id/code-mappings', async (req, res) => {
+  try {
+    const { budgetCode, actualCode, mappings } = req.body;
+
+    // Get current mappings
+    const current = await codeMappingQueries.getByProject(req.params.id);
+
+    // If adding a single mapping, merge with existing
+    let updatedMappings = current.mappings || {};
+    if (budgetCode && actualCode) {
+      updatedMappings[budgetCode] = actualCode;
+    } else if (mappings) {
+      // If replacing all mappings
+      updatedMappings = mappings;
+    }
+
+    await codeMappingQueries.saveMappings(req.params.id, updatedMappings);
+    const updated = await codeMappingQueries.getByProject(req.params.id);
+    res.json(updated);
+  } catch (error) {
+    console.error('Error saving code mappings:', error);
+    res.status(500).json({ error: 'Failed to save code mappings' });
+  }
+});
+
+// Delete a specific code mapping
+app.delete('/api/projects/:id/code-mappings/:budgetCode', async (req, res) => {
+  try {
+    await codeMappingQueries.deleteMapping(req.params.id, req.params.budgetCode);
+    const updated = await codeMappingQueries.getByProject(req.params.id);
+    res.json(updated);
+  } catch (error) {
+    console.error('Error deleting code mapping:', error);
+    res.status(500).json({ error: 'Failed to delete code mapping' });
+  }
 });
 
 // Debug endpoint to check stored cost codes
