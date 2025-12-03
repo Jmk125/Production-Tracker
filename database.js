@@ -11,8 +11,9 @@ const AREAS_FILE = path.join(DATA_DIR, 'areas.json');
 function normalizeCostCode(value) {
   if (value === undefined || value === null) return null;
   const [mainPart] = value.toString().split('.');
-  const numeric = mainPart.replace(/\D/g, '').trim();
-  return numeric || null;
+  // Keep hyphen, remove other non-digit characters
+  const normalized = mainPart.replace(/[^\d-]/g, '').trim();
+  return normalized || null;
 }
 
 function normalizeJobLabel(value) {
