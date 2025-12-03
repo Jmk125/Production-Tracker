@@ -43,6 +43,14 @@ function normalizeJobLabel(value) {
   return value.toString().trim().toLowerCase();
 }
 
+// Normalize cost code by removing trailing zeros for comparison
+function normalizeForComparison(code) {
+  if (!code) return '';
+  // Remove trailing zeros, then parse as integer to handle leading zeros
+  const withoutTrailing = code.toString().replace(/0+$/, '');
+  return withoutTrailing || '0';
+}
+
 // Align budget codes to payroll codes by matching on numeric prefixes
 function alignBudgetCostCodes(budgetHours = {}, actualTotals = {}) {
   const actualCodes = Object.keys(actualTotals || {});
@@ -57,9 +65,12 @@ function alignBudgetCostCodes(budgetHours = {}, actualTotals = {}) {
       return;
     }
 
-    // Try to find a match by numeric value (handles leading zeros: "9100" vs "09100")
-    const budgetNumeric = parseInt(budgetCode, 10);
-    const matchingActual = actualCodes.find(code => parseInt(code, 10) === budgetNumeric);
+    // Normalize to handle both leading and trailing zeros
+    // "09100" vs "9100" (leading) and "12220" vs "1222" (trailing)
+    const budgetNormalized = normalizeForComparison(budgetCode);
+    const matchingActual = actualCodes.find(code =>
+      normalizeForComparison(code) === budgetNormalized
+    );
 
     const targetCode = matchingActual || budgetCode;
     aligned[targetCode] = (aligned[targetCode] || 0) + hours;
@@ -83,9 +94,11 @@ function alignCostCodeNames(budgetNames = {}, actualTotals = {}) {
       return;
     }
 
-    // Try to find a match by numeric value (handles leading zeros: "9100" vs "09100")
-    const budgetNumeric = parseInt(budgetCode, 10);
-    const matchingActual = actualCodes.find(code => parseInt(code, 10) === budgetNumeric);
+    // Normalize to handle both leading and trailing zeros
+    const budgetNormalized = normalizeForComparison(budgetCode);
+    const matchingActual = actualCodes.find(code =>
+      normalizeForComparison(code) === budgetNormalized
+    );
 
     const targetCode = matchingActual || budgetCode;
     if (!aligned[targetCode]) {
