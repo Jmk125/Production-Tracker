@@ -43,7 +43,8 @@ async function parsePayrollPDF(filePath) {
     // The key identifiers are: Pay Class (J/F/G/A1-A6), 3-digit pay ID, Cert Class, hours with decimal, rate with 5 decimals, cost code
     // Example: "      J   841       TA01J1       0                 2.50      31.68000           79.207552.  Cuy Fal Bld 1 1st Fl             09-170"
     // More flexible pattern that handles varying spacing and different "7552" vs "7572" endings
-    const entryMatch = line.match(/^\s+([JFGA]\d?)\s+(\d{3})\s+([A-Z]{2}\d{2}[A-Z]\d)\s+\S+\s+([\d.]+)\s+([\d.]+)\s+[\d.,]+75\d{2}\.\s+(.+?)\s+([\d]{2}-[\d]{3})/);
+    // Cost code pattern updated to handle variable lengths: 1-2 digits, hyphen, 2-5 digits (e.g., "1-400", "09-170", "01-4000")
+    const entryMatch = line.match(/^\s+([JFGA]\d?)\s+(\d{3})\s+([A-Z]{2}\d{2}[A-Z]\d)\s+\S+\s+([\d.]+)\s+([\d.]+)\s+[\d.,]+75\d{2}\.\s+(.+?)\s+([\d]{1,2}-[\d]{2,5})/);
     
     if (entryMatch && currentEmployee && currentDate) {
       const payClass = entryMatch[1];
