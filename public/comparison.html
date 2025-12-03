@@ -1352,11 +1352,41 @@
           })
         );
 
+        mergeMappedCostCodeNames(projectMappings);
         renderCodeMappings(projectMappings);
       } catch (error) {
         console.error('Error loading code mappings:', error);
         container.innerHTML = '<p style="color: var(--danger-color); text-align: center;">Error loading mappings</p>';
       }
+    }
+
+
+    function mergeMappedCostCodeNames(projectMappings) {
+      const updatedNames = { ...(comparisonCostCodeNames || {}) };
+
+      projectMappings.forEach(({ project, mappings }) => {
+        const budgetNameMap = {};
+
+        (project.budgetComparison || []).forEach(row => {
+          if (!row.cost_code || !row.cost_code_name) return;
+          const normalized = normalizeCostCodeValue(row.cost_code);
+          const cleanName = row.cost_code_name?.toString().trim();
+          if (!normalized || !cleanName) return;
+          budgetNameMap[normalized] = cleanName;
+        });
+
+        Object.entries(mappings || {}).forEach(([budget, actual]) => {
+          const normalizedActual = normalizeCostCodeValue(actual);
+          const normalizedBudget = normalizeCostCodeValue(budget);
+          if (!normalizedActual || !normalizedBudget) return;
+
+          if (!updatedNames[normalizedActual] && budgetNameMap[normalizedBudget]) {
+            updatedNames[normalizedActual] = budgetNameMap[normalizedBudget];
+          }
+        });
+      });
+
+      comparisonCostCodeNames = updatedNames;
     }
 
 
@@ -1369,6 +1399,7 @@
         const budgetCodes = new Set();
         const actualCodes = new Set();
         const budgetStats = {};
+        const actualTotals = {};
 
         (project.budgetComparison || []).forEach(row => {
           if (row.cost_code) {
@@ -1386,6 +1417,8 @@
         (project.data || []).forEach(entry => {
           if (entry.cost_code) {
             actualCodes.add(entry.cost_code);
+            const hours = Number(entry.total_hours) || 0;
+            actualTotals[entry.cost_code] = (actualTotals[entry.cost_code] || 0) + hours;
           }
         });
 
@@ -1396,13 +1429,36 @@
           return acc;
         }, {});
 
-        const matchedCount = Object.keys(mappings || {}).length;
-        const unmatchedBudgetCodes = sortedBudgetCodes.filter(code => !mappings[code]);
-        const unmatchedActualCodes = sortedActualCodes.filter(code => !mappedActualToBudget[code]);
+        const matchedAutomatically = sortedBudgetCodes.filter(code => {
+          const stats = budgetStats[code] || {};
+          const budgetHours = Number(stats.budget) || 0;
+          const spentHours = (Number(stats.actual) || 0) + (Number(actualTotals[code]) || 0);
+          return budgetHours > 0 && spentHours > 0;
+        });
+
+        const matchedCount = new Set([
+          ...matchedAutomatically,
+          ...Object.keys(mappings || {})
+        ]).size;
+
+        const unmatchedBudgetCodes = sortedBudgetCodes.filter(code => {
+          const stats = budgetStats[code] || {};
+          const budgetHours = Number(stats.budget) || 0;
+          const spentHours = (Number(stats.actual) || 0) + (Number(actualTotals[code]) || 0);
+          return budgetHours > 0 && spentHours === 0;
+        });
+
+        const unmatchedActualCodes = sortedActualCodes.filter(code => {
+          const stats = budgetStats[code] || {};
+          const budgetHours = Number(stats.budget) || 0;
+          if (budgetHours > 0) return false;
+          const mappedBudget = mappedActualToBudget[code];
+          return !mappedBudget;
+        });
 
         const budgetRows = sortedBudgetCodes.map(code => {
           const mappedTarget = mappings[code] || '';
-          const availableActualCodes = sortedActualCodes.filter(actualCode => {
+          const availableActualCodes = unmatchedActualCodes.filter(actualCode => {
             const mappedBudget = mappedActualToBudget[actualCode];
             return !mappedBudget || mappedBudget === code;
           });
@@ -1412,9 +1468,12 @@
           }
 
           const budgetInfo = budgetStats[code] || { budget: 0, actual: 0 };
+          const hasSpentHours = (Number(budgetInfo.actual) || 0) + (Number(actualTotals[code]) || 0) > 0;
           const mappedLabel = mappedTarget
             ? `<span style="display: inline-flex; align-items: center; gap: 0.35rem; padding: 0.35rem 0.5rem; background: var(--success-surface); border-radius: 999px; color: var(--success-color); font-size: 0.8rem;">Matched to ${escapeHtml(mappedTarget)}</span>`
-            : `<span style="display: inline-flex; align-items: center; gap: 0.35rem; padding: 0.35rem 0.5rem; background: var(--card-background); border-radius: 999px; color: var(--text-secondary); font-size: 0.8rem;">Unmatched</span>`;
+            : hasSpentHours
+              ? `<span style="display: inline-flex; align-items: center; gap: 0.35rem; padding: 0.35rem 0.5rem; background: rgba(34,197,94,0.12); border-radius: 999px; color: var(--success-color); font-size: 0.8rem;">Auto-matched by code</span>`
+              : `<span style="display: inline-flex; align-items: center; gap: 0.35rem; padding: 0.35rem 0.5rem; background: var(--card-background); border-radius: 999px; color: var(--text-secondary); font-size: 0.8rem;">Unmatched</span>`;
 
           return `
             <div style="display: grid; grid-template-columns: 1.2fr 1fr 0.9fr; gap: 0.75rem; align-items: center; padding: 0.65rem 0.75rem; border: 1px solid var(--border-color); border-radius: 6px; background: var(--card-background);">
@@ -1444,15 +1503,21 @@
 
         const actualRows = sortedActualCodes.map(code => {
           const mappedBudget = mappedActualToBudget[code];
+          const stats = budgetStats[code] || {};
+          const budgetHours = Number(stats.budget) || 0;
+          const statusLabel = budgetHours > 0
+            ? 'Auto-matched by code'
+            : mappedBudget
+              ? `Matched to ${escapeHtml(mappedBudget)}`
+              : 'Not matched yet';
+          const isUnmatched = budgetHours === 0 && !mappedBudget;
           return `
             <div style="display: flex; justify-content: space-between; align-items: center; padding: 0.5rem 0.75rem; border: 1px dashed var(--border-color); border-radius: 6px; background: var(--background);">
               <div>
                 <div style="font-family: monospace; font-weight: 600;">${escapeHtml(code)}</div>
-                <div style="color: var(--text-secondary); font-size: 0.85rem;">
-                  ${mappedBudget ? `Matched to ${escapeHtml(mappedBudget)}` : 'Not matched yet'}
-                </div>
+                <div style="color: var(--text-secondary); font-size: 0.85rem;">${statusLabel}</div>
               </div>
-              <span style="font-size: 0.8rem; color: ${mappedBudget ? 'var(--success-color)' : 'var(--warning-color)'}; background: ${mappedBudget ? 'var(--success-surface)' : 'rgba(234,179,8,0.12)'}; padding: 0.3rem 0.55rem; border-radius: 999px;">${mappedBudget ? 'Mapped' : 'Unmapped'}</span>
+              <span style="font-size: 0.8rem; color: ${isUnmatched ? 'var(--warning-color)' : 'var(--success-color)'}; background: ${isUnmatched ? 'rgba(234,179,8,0.12)' : 'var(--success-surface)'}; padding: 0.3rem 0.55rem; border-radius: 999px;">${isUnmatched ? 'Unmapped' : 'Mapped'}</span>
             </div>
           `;
         }).join('') || '<div class="empty-filter">No actual codes found.</div>';
