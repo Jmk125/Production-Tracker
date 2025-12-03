@@ -61,10 +61,14 @@
                 <option value="packageComparison">Packages: 09 vs 06/08/10/11/12</option>
               </select>
               <div style="display: flex; gap: 0.75rem; align-items: center; flex-wrap: wrap;">
+                <label class="checkbox" style="margin: 0;">
+                  <input type="checkbox" id="showAverageCurvesToggle" onchange="updateCharts()">
+                  Show average curves
+                </label>
                 <select id="averageCurveMode" onchange="updateCharts()">
                   <option value="actual">Show actual only</option>
                   <option value="average">Average curves</option>
-                  <option value="overlay">Actual with average overlay</option>
+                  <option value="overlay" selected>Actual with average overlay</option>
                 </select>
                 <label class="checkbox" style="margin: 0;">
                   <input type="checkbox" id="combinedAverageToggle" checked onchange="updateCharts()">
@@ -803,9 +807,10 @@
 
     function applyAverageCurve(chartData) {
       const mode = document.getElementById('averageCurveMode')?.value || 'actual';
+      const showAverages = document.getElementById('showAverageCurvesToggle')?.checked;
       const includeCombined = document.getElementById('combinedAverageToggle')?.checked;
 
-      if (mode === 'actual' || !chartData?.datasets?.length) {
+      if (!showAverages || mode === 'actual' || !chartData?.datasets?.length) {
         return chartData;
       }
 
