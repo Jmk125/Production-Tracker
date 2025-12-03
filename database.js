@@ -14,6 +14,15 @@ function normalizeCostCode(value) {
   // Keep hyphen, remove other non-digit characters
   let normalized = mainPart.replace(/[^\d-]/g, '').trim();
 
+  // If no hyphen and 4-5 digits, might be missing leading zero from Excel number formatting
+  // E.g., "1200" should be "01-200" not "12-00"
+  if (normalized && !normalized.includes('-') && normalized.length >= 4 && normalized.length <= 5) {
+    // If first digit is 1-9 (not 0), likely missing leading zero
+    if (normalized[0] !== '0') {
+      normalized = '0' + normalized;
+    }
+  }
+
   // If no hyphen and 4+ digits, insert hyphen after first 2 digits (CSI MasterFormat)
   if (normalized && !normalized.includes('-') && normalized.length >= 4) {
     normalized = normalized.slice(0, 2) + '-' + normalized.slice(2);
