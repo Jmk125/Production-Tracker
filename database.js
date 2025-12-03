@@ -12,7 +12,13 @@ function normalizeCostCode(value) {
   if (value === undefined || value === null) return null;
   const [mainPart] = value.toString().split('.');
   // Keep hyphen, remove other non-digit characters
-  const normalized = mainPart.replace(/[^\d-]/g, '').trim();
+  let normalized = mainPart.replace(/[^\d-]/g, '').trim();
+
+  // If no hyphen and 4+ digits, insert hyphen after first 2 digits (CSI MasterFormat)
+  if (normalized && !normalized.includes('-') && normalized.length >= 4) {
+    normalized = normalized.slice(0, 2) + '-' + normalized.slice(2);
+  }
+
   return normalized || null;
 }
 

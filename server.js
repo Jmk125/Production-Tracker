@@ -31,11 +31,18 @@ if (!fs.existsSync(uploadsDir)) {
 }
 
 // Normalize cost codes: keep hyphen, remove other non-digits (except hyphen)
+// If no hyphen exists and code is 4+ digits, insert one after first 2 digits (CSI format)
 function normalizeCostCode(value) {
   if (value === undefined || value === null) return null;
   const [mainPart] = value.toString().split('.');
   // Keep hyphen, remove other non-digit characters
-  const normalized = mainPart.replace(/[^\d-]/g, '').trim();
+  let normalized = mainPart.replace(/[^\d-]/g, '').trim();
+
+  // If no hyphen and 4+ digits, insert hyphen after first 2 digits (CSI MasterFormat)
+  if (normalized && !normalized.includes('-') && normalized.length >= 4) {
+    normalized = normalized.slice(0, 2) + '-' + normalized.slice(2);
+  }
+
   return normalized || null;
 }
 
