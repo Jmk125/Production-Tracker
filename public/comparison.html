@@ -159,14 +159,27 @@
           <div id="costCodeVarianceTable"></div>
         </div>
 
-        <div id="metricsComparison" style="display: none;">
-          <div class="card">
-            <h3 class="card-title" style="margin-bottom: 1rem;">Comparative Metrics</h3>
-            <div id="metricsGrid" class="grid grid-2">
-              <!-- Metrics will be populated here -->
-            </div>
+      <div id="metricsComparison" style="display: none;">
+        <div class="card">
+          <h3 class="card-title" style="margin-bottom: 1rem;">Comparative Metrics</h3>
+          <div id="metricsGrid" class="grid grid-2">
+            <!-- Metrics will be populated here -->
           </div>
         </div>
+
+        <div class="card" style="margin-top: 1.25rem;">
+          <div class="card-header" style="margin-bottom: 0.75rem; align-items: flex-start;">
+            <div>
+              <h3 class="card-title">Variance % by Project</h3>
+              <div style="color: var(--text-secondary); font-size: 0.9rem;">Budget vs. spent variance percentage for each project and the selected average</div>
+            </div>
+          </div>
+          <div class="chart-container" style="min-height: 320px;">
+            <canvas id="variancePercentChart" aria-label="Variance percent chart"></canvas>
+            <div id="varianceChartEmpty" style="display: none; color: var(--text-secondary); text-align: center; padding: 1rem;">No variance percentage data available.</div>
+          </div>
+        </div>
+      </div>
 
         <div id="emptyState" class="empty-state">
           <div class="empty-state-icon">📊</div>
@@ -207,6 +220,7 @@
     let comparisonChart = null;
     let employeeComparisonChart = null;
     let costCodeVarianceChart = null;
+    let variancePercentChart = null;
     let applyCostCodeFiltersToMetrics = true;
     const chartColors = [
       'rgba(37, 99, 235, 1)',
@@ -1180,6 +1194,8 @@
       cards.push(...metrics.map(m => renderMetricCard(m)));
 
       metricsGrid.innerHTML = cards.join('');
+
+      renderVariancePercentChart(metrics, averageMetrics);
     }
 
     function buildAverageMetrics(metrics = []) {
@@ -1304,6 +1320,80 @@
           </div>
         </div>
       `;
+    }
+
+    function renderVariancePercentChart(metrics = [], averageMetrics = null) {
+      const canvas = document.getElementById('variancePercentChart');
+      const emptyState = document.getElementById('varianceChartEmpty');
+      if (!canvas || !emptyState) return;
+
+      const varianceMetrics = metrics.filter(m => m.variancePercent !== null && m.variancePercent !== undefined);
+      const hasAverage = averageMetrics && averageMetrics.variancePercent !== null && averageMetrics.variancePercent !== undefined;
+
+      const labels = varianceMetrics.map(m => m.name);
+      const data = varianceMetrics.map(m => Number(m.variancePercent) || 0);
+      const backgroundColors = varianceMetrics.map((_, index) => chartColors[index % chartColors.length].replace('1)', '0.6)'));
+
+      if (hasAverage) {
+        labels.push(averageMetrics.name);
+        data.push(Number(averageMetrics.variancePercent) || 0);
+        backgroundColors.push('rgba(16, 24, 40, 0.7)');
+      }
+
+      const hasData = labels.length > 0;
+      canvas.style.display = hasData ? 'block' : 'none';
+      emptyState.style.display = hasData ? 'none' : 'block';
+
+      if (!hasData) {
+        if (variancePercentChart) {
+          variancePercentChart.destroy();
+          variancePercentChart = null;
+        }
+        return;
+      }
+
+      if (variancePercentChart) {
+        variancePercentChart.destroy();
+      }
+
+      const ctx = canvas.getContext('2d');
+      variancePercentChart = new Chart(ctx, {
+        type: 'bar',
+        data: {
+          labels,
+          datasets: [
+            {
+              label: 'Variance %',
+              data,
+              backgroundColor: backgroundColors,
+              borderRadius: 6
+            }
+          ]
+        },
+        options: {
+          responsive: true,
+          maintainAspectRatio: false,
+          plugins: {
+            legend: { display: false },
+            tooltip: {
+              callbacks: {
+                label: context => formatPercentVariance(context.parsed.y)
+              }
+            }
+          },
+          scales: {
+            x: {
+              ticks: { autoSkip: false, maxRotation: 45, minRotation: 20 }
+            },
+            y: {
+              title: { display: true, text: 'Variance %' },
+              ticks: {
+                callback: value => `${value}%`
+              }
+            }
+          }
+        }
+      });
     }
 
     function getProjectName(projectId) {
