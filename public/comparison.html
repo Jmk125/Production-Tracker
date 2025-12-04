@@ -99,6 +99,15 @@
                   </label>
                 </div>
                 <div id="comparisonCostCodeList" class="filter-list"></div>
+                <div class="filter-actions" style="margin-top: 0.75rem; padding-top: 0.5rem; border-top: 1px solid var(--border-color); align-items: flex-start;">
+                  <label class="checkbox" style="align-items: flex-start; gap: 0.5rem;">
+                    <input type="checkbox" id="metricsCostCodeFilterToggle" checked onchange="handleMetricsFilterToggle(event)">
+                    <div>
+                      <div>Apply cost code filters to metrics</div>
+                      <div style="color: var(--text-secondary); font-size: 0.85rem;">Project metric cards will use the selected cost codes.</div>
+                    </div>
+                  </label>
+                </div>
               </div>
             </div>
           </div>
@@ -198,6 +207,7 @@
     let comparisonChart = null;
     let employeeComparisonChart = null;
     let costCodeVarianceChart = null;
+    let applyCostCodeFiltersToMetrics = true;
     const chartColors = [
       'rgba(37, 99, 235, 1)',
       'rgba(34, 197, 94, 1)',
@@ -470,6 +480,12 @@
       updateComparisonChart(filteredData);
       updateEmployeeChart(filteredData);
       renderCostCodeVarianceChart(filteredData);
+      renderMetrics();
+    }
+
+    function handleMetricsFilterToggle(event) {
+      applyCostCodeFiltersToMetrics = Boolean(event?.target?.checked);
+      renderMetrics();
     }
 
     function updateComparisonChart(data = comparisonData) {
@@ -1117,16 +1133,28 @@
 
     function renderMetrics() {
       const metricsGrid = document.getElementById('metricsGrid');
-      
-      const metrics = comparisonData.map(project => {
+
+      const metricsSource = applyCostCodeFiltersToMetrics
+        ? getFilteredComparisonData()
+        : comparisonData;
+
+      if (!metricsSource.length) {
+        metricsGrid.innerHTML = '<div class="empty-filter">No metrics available.</div>';
+        return;
+      }
+
+      const metrics = metricsSource.map(project => {
         const totalHours = project.data.reduce((sum, entry) => sum + (Number(entry.total_hours) || 0), 0);
         const uniqueEmployees = new Set(project.data.map(e => e.employee_name)).size;
         const costCodes = new Set(project.data.map(e => e.cost_code).filter(Boolean)).size;
-        const projectMonths = Math.max(...project.data.map(e => e.project_month));
+        const projectMonths = project.data.length ? Math.max(...project.data.map(e => e.project_month)) : 0;
         const avgHoursPerMonth = projectMonths ? totalHours / projectMonths : 0;
-        const budgetedHours = Number(project.budgetSummary?.budgetedHours) || null;
-        const spentHours = Number(project.budgetSummary?.actualHours);
-        const varianceHours = Number(project.budgetSummary?.varianceHours);
+        const budgetRows = project.budgetComparison || [];
+        const hasBudget = budgetRows.length > 0;
+        const budgetedHours = hasBudget ? budgetRows.reduce((sum, row) => sum + (Number(row.budget_hours) || 0), 0) : null;
+        const spentHours = hasBudget ? budgetRows.reduce((sum, row) => sum + (Number(row.actual_hours) || 0), 0) : null;
+        const varianceHours = budgetedHours !== null && spentHours !== null ? spentHours - budgetedHours : null;
+        const variancePercent = budgetedHours > 0 && spentHours !== null ? ((varianceHours || 0) / budgetedHours) * 100 : null;
 
         return {
           name: project.data[0]?.project_name || `Project ${project.projectId}`,
@@ -1137,57 +1165,145 @@
           avgHoursPerMonth,
           budgetedHours,
           spentHours,
-          varianceHours
+          varianceHours,
+          variancePercent
         };
       });
 
-      metricsGrid.innerHTML = metrics.map(m => `
-        <div class="card" style="background-color: var(--background);">
-          <h4 style="margin-bottom: 1rem; font-size: 1rem;">${escapeHtml(m.name)}</h4>
+      const averageMetrics = buildAverageMetrics(metrics);
+      const cards = [];
+
+      if (averageMetrics) {
+        cards.push(renderMetricCard(averageMetrics, true));
+      }
+
+      cards.push(...metrics.map(m => renderMetricCard(m)));
+
+      metricsGrid.innerHTML = cards.join('');
+    }
+
+    function buildAverageMetrics(metrics = []) {
+      if (!metrics.length) return null;
+
+      const totals = metrics.reduce((acc, metric) => {
+        acc.totalHours += metric.totalHours || 0;
+        acc.uniqueEmployees += metric.uniqueEmployees || 0;
+        acc.costCodes += metric.costCodes || 0;
+        acc.projectMonths += metric.projectMonths || 0;
+        acc.avgHoursPerMonth += metric.avgHoursPerMonth || 0;
+
+        if (metric.budgetedHours !== null && metric.budgetedHours !== undefined) {
+          acc.budgetedHours.total += metric.budgetedHours;
+          acc.budgetedHours.count += 1;
+        }
+
+        if (metric.spentHours !== null && metric.spentHours !== undefined) {
+          acc.spentHours.total += metric.spentHours;
+          acc.spentHours.count += 1;
+        }
+
+        if (metric.varianceHours !== null && metric.varianceHours !== undefined) {
+          acc.varianceHours.total += metric.varianceHours;
+          acc.varianceHours.count += 1;
+        }
+
+        if (metric.variancePercent !== null && metric.variancePercent !== undefined) {
+          acc.variancePercent.total += metric.variancePercent;
+          acc.variancePercent.count += 1;
+        }
+
+        return acc;
+      }, {
+        totalHours: 0,
+        uniqueEmployees: 0,
+        costCodes: 0,
+        projectMonths: 0,
+        avgHoursPerMonth: 0,
+        budgetedHours: { total: 0, count: 0 },
+        spentHours: { total: 0, count: 0 },
+        varianceHours: { total: 0, count: 0 },
+        variancePercent: { total: 0, count: 0 }
+      });
+
+      const count = metrics.length;
+
+      return {
+        name: 'Selected Projects Average',
+        totalHours: totals.totalHours / count,
+        uniqueEmployees: Math.round(totals.uniqueEmployees / count),
+        costCodes: Math.round(totals.costCodes / count),
+        projectMonths: Math.round(totals.projectMonths / count),
+        avgHoursPerMonth: totals.avgHoursPerMonth / count,
+        budgetedHours: totals.budgetedHours.count ? totals.budgetedHours.total / totals.budgetedHours.count : null,
+        spentHours: totals.spentHours.count ? totals.spentHours.total / totals.spentHours.count : null,
+        varianceHours: totals.varianceHours.count ? totals.varianceHours.total / totals.varianceHours.count : null,
+        variancePercent: totals.variancePercent.count ? totals.variancePercent.total / totals.variancePercent.count : null
+      };
+    }
+
+    function renderMetricCard(metric, isAggregate = false) {
+      const varianceColor = metric.varianceHours === null || metric.varianceHours === undefined
+        ? 'var(--text-color, #0f172a)'
+        : metric.varianceHours >= 0
+          ? 'var(--danger-color, #ef4444)'
+          : 'var(--success-color, #22c55e)';
+      const variancePercentLabel = metric.variancePercent !== null && metric.variancePercent !== undefined
+        ? formatPercentVariance(metric.variancePercent)
+        : '—';
+
+      const backgroundStyle = isAggregate
+        ? 'background: linear-gradient(135deg, rgba(37,99,235,0.08), rgba(255,255,255,0.9));'
+        : 'background-color: var(--background);';
+
+      return `
+        <div class="card" style="${backgroundStyle}">
+          <h4 style="margin-bottom: 1rem; font-size: 1rem; display: flex; align-items: center; gap: 0.5rem;">${escapeHtml(metric.name)}${isAggregate ? '<span style="font-size: 0.8rem; color: var(--primary-color); background: rgba(37,99,235,0.12); padding: 0.1rem 0.5rem; border-radius: 999px;">Averages</span>' : ''}</h4>
           <div style="display: grid; gap: 0.75rem;">
             <div>
               <div style="font-size: 1.5rem; font-weight: 700; color: var(--primary-color);">
-                ${m.totalHours.toLocaleString()}
+                ${Number(metric.totalHours || 0).toLocaleString(undefined, { maximumFractionDigits: 0 })}
               </div>
               <div style="color: var(--text-secondary); font-size: 0.813rem;">Total Hours</div>
             </div>
             <div>
               <div style="font-size: 1.25rem; font-weight: 600;">
-                ${m.avgHoursPerMonth.toLocaleString(undefined, { maximumFractionDigits: 0 })}
+                ${Number(metric.avgHoursPerMonth || 0).toLocaleString(undefined, { maximumFractionDigits: 0 })}
               </div>
               <div style="color: var(--text-secondary); font-size: 0.813rem;">Avg Hours/Month</div>
             </div>
             <div style="display: flex; justify-content: space-between; padding-top: 0.75rem; border-top: 1px solid var(--border-color);">
               <div>
-                <div style="font-weight: 600;">${m.uniqueEmployees}</div>
+                <div style="font-weight: 600;">${Number(metric.uniqueEmployees || 0).toLocaleString()}</div>
                 <div style="color: var(--text-secondary); font-size: 0.75rem;">Employees</div>
               </div>
               <div>
-                <div style="font-weight: 600;">${m.projectMonths}</div>
+                <div style="font-weight: 600;">${Number(metric.projectMonths || 0).toLocaleString()}</div>
                 <div style="color: var(--text-secondary); font-size: 0.75rem;">Months</div>
               </div>
               <div>
-                <div style="font-weight: 600;">${m.costCodes}</div>
+                <div style="font-weight: 600;">${Number(metric.costCodes || 0).toLocaleString()}</div>
                 <div style="color: var(--text-secondary); font-size: 0.75rem;">Cost Codes</div>
               </div>
             </div>
             <div style="display: grid; grid-template-columns: repeat(auto-fit, minmax(140px, 1fr)); gap: 0.75rem; padding-top: 0.75rem; border-top: 1px solid var(--border-color);">
               <div>
-                <div style="font-weight: 600;">${m.budgetedHours !== null ? m.budgetedHours.toLocaleString() : '—'}</div>
+                <div style="font-weight: 600;">${metric.budgetedHours !== null && metric.budgetedHours !== undefined ? Number(metric.budgetedHours).toLocaleString() : '—'}</div>
                 <div style="color: var(--text-secondary); font-size: 0.75rem;">Budgeted Hours</div>
               </div>
               <div>
-                <div style="font-weight: 600;">${m.spentHours !== undefined && m.spentHours !== null ? m.spentHours.toLocaleString() : '—'}</div>
+                <div style="font-weight: 600;">${metric.spentHours !== null && metric.spentHours !== undefined ? Number(metric.spentHours).toLocaleString() : '—'}</div>
                 <div style="color: var(--text-secondary); font-size: 0.75rem;">Spent Hours</div>
               </div>
-              <div>
-                <div style="font-weight: 600; color: ${m.varianceHours >= 0 ? 'var(--danger-color, #ef4444)' : 'var(--success-color, #22c55e)'};">${m.varianceHours !== undefined && m.varianceHours !== null ? m.varianceHours.toLocaleString() : '—'}</div>
+              <div style="display: grid; gap: 0.35rem;">
+                <div style="font-weight: 600; color: ${varianceColor};">${metric.varianceHours !== undefined && metric.varianceHours !== null ? Number(metric.varianceHours).toLocaleString(undefined, { maximumFractionDigits: 1 }) : '—'}</div>
                 <div style="color: var(--text-secondary); font-size: 0.75rem;">Delta (Spent - Budget)</div>
+                <div style="font-weight: 600; color: ${varianceColor};">${variancePercentLabel}</div>
+                <div style="color: var(--text-secondary); font-size: 0.75rem;">Variance %</div>
               </div>
             </div>
           </div>
         </div>
-      `).join('');
+      `;
     }
 
     function getProjectName(projectId) {
