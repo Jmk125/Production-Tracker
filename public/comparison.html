@@ -150,7 +150,10 @@
                 </select>
               </div>
               <button class="btn btn-secondary" onclick="openCodeMappingModal()" style="font-size: 0.875rem;">
-                Manage Code Mappings
+                Manage Code Matching
+              </button>
+              <button class="btn" onclick="openCodeGroupingModal()" style="font-size: 0.875rem;">
+                Code Grouping
               </button>
               <label class="checkbox" style="margin: 0; display: flex; align-items: center; gap: 0.35rem;">
                 <input type="checkbox" id="showVarianceAverageBar" onchange="renderCostCodeVarianceChart(getFilteredComparisonData())">
@@ -197,22 +200,55 @@
     </div>
   </div>
 
-  <!-- Code Mapping Modal -->
+  <!-- Code Matching Modal -->
   <div id="codeMappingModal" class="modal" style="display: none;">
     <div class="modal-content" style="max-width: 900px; max-height: 80vh; overflow-y: auto;">
       <div class="modal-header">
-        <h3>Manage Cost Code Mappings</h3>
+        <h3>Manage Cost Code Matching</h3>
         <button class="modal-close" onclick="closeCodeMappingModal()">&times;</button>
       </div>
       <div class="modal-body">
         <p style="color: var(--text-secondary); margin-bottom: 1.5rem;">
-          Manually map budget codes to actual payroll codes. These mappings are saved per project and will be used in future comparisons.
+          Manually match budget codes to actual payroll codes. These matches are saved per project and will be used in future comparisons.
         </p>
 
         <div id="codeMappingProjects"></div>
       </div>
       <div class="modal-footer">
         <button class="btn btn-secondary" onclick="closeCodeMappingModal()">Close</button>
+      </div>
+    </div>
+  </div>
+
+  <!-- Code Grouping Modal -->
+  <div id="codeGroupingModal" class="modal" style="display: none;">
+    <div class="modal-content" style="max-width: 820px; max-height: 82vh; overflow-y: auto;">
+      <div class="modal-header">
+        <h3>Group Cost Codes</h3>
+        <button class="modal-close" onclick="closeCodeGroupingModal()">&times;</button>
+      </div>
+      <div class="modal-body">
+        <p style="color: var(--text-secondary); margin-bottom: 1rem;">
+          Combine multiple cost codes into a single bar on the comparison charts. Drag a code onto another group or the ungrouped list to reorganize.
+        </p>
+        <div style="display: flex; gap: 0.75rem; flex-wrap: wrap; margin-bottom: 1rem;">
+          <button class="btn btn-secondary" onclick="promptNewCostCodeGroup()">New Group</button>
+          <button class="btn btn-primary" onclick="saveCostCodeGroupingPreset()">Save Grouping</button>
+          <button class="btn" onclick="resetCostCodeGroups()">Reset Groupings</button>
+        </div>
+        <div class="card" style="margin-bottom: 1rem;">
+          <div style="display: flex; justify-content: space-between; align-items: center; flex-wrap: wrap; gap: 0.75rem;">
+            <div>
+              <div style="font-weight: 600;">Saved groupings</div>
+              <div style="color: var(--text-secondary); font-size: 0.9rem;">Save, load, or remove grouping presets.</div>
+            </div>
+            <div id="savedGroupingList" style="display: flex; flex-direction: column; gap: 0.35rem; width: 100%; max-width: 520px;"></div>
+          </div>
+        </div>
+        <div id="codeGroupingList"></div>
+      </div>
+      <div class="modal-footer">
+        <button class="btn btn-secondary" onclick="closeCodeGroupingModal()">Close</button>
       </div>
     </div>
   </div>
@@ -229,6 +265,12 @@
     let costCodeVarianceChart = null;
     let variancePercentChart = null;
     let applyCostCodeFiltersToMetrics = true;
+    let customCostCodeGroups = new Set();
+    let costCodeGroupAssignments = {};
+    let savedCostCodeGroupPresets = {};
+    let activeCostCodeDrag = null;
+    const costCodeGroupStorageKey = 'comparisonCostCodeGroups';
+    const costCodeGroupPresetStorageKey = 'comparisonCostCodeGroupPresets';
     const chartColors = [
       'rgba(37, 99, 235, 1)',
       'rgba(34, 197, 94, 1)',
@@ -243,6 +285,8 @@
 
     document.addEventListener('DOMContentLoaded', () => {
       enforceSingleTimelineControls();
+      loadStoredCostCodeGroups();
+      loadStoredCostCodeGroupPresets();
       loadProjects();
     });
 
@@ -1010,6 +1054,40 @@
       };
     }
 
+    function aggregateVarianceRows(rows = []) {
+      const grouped = {};
+
+      rows.forEach(row => {
+        const normalized = normalizeCostCodeLabel(row.cost_code);
+        const groupLabel = getGroupedCostCodeLabel(normalized);
+
+        if (!grouped[groupLabel]) {
+          grouped[groupLabel] = {
+            cost_code: groupLabel,
+            budget_hours: 0,
+            actual_hours: 0,
+            variance_hours: 0,
+            variance_percent: null,
+            sourceCodes: new Set()
+          };
+        }
+
+        grouped[groupLabel].budget_hours += Number(row.budget_hours) || 0;
+        grouped[groupLabel].actual_hours += Number(row.actual_hours) || 0;
+        grouped[groupLabel].sourceCodes.add(normalized);
+      });
+
+      Object.values(grouped).forEach(row => {
+        row.variance_hours = Number((row.actual_hours || 0) - (row.budget_hours || 0));
+        row.variance_percent = row.budget_hours
+          ? Number((((row.actual_hours || 0) - (row.budget_hours || 0)) / row.budget_hours) * 100)
+          : null;
+        row.sourceCodes = Array.from(row.sourceCodes);
+      });
+
+      return grouped;
+    }
+
     function renderCostCodeVarianceChart(data = comparisonData) {
       const container = document.getElementById('costCodeVarianceTable');
       const card = document.getElementById('costCodeVarianceCard');
@@ -1036,10 +1114,10 @@
       }
 
       const costCodes = new Set();
-      data.forEach(project => {
-        (project.budgetComparison || []).forEach(row => {
-          costCodes.add(normalizeCostCodeLabel(row.cost_code));
-        });
+      const aggregatedProjects = data.map(project => {
+        const aggregated = aggregateVarianceRows(project.budgetComparison || []);
+        Object.keys(aggregated).forEach(code => costCodes.add(code));
+        return { project, aggregated };
       });
 
       card.style.display = 'block';
@@ -1055,15 +1133,11 @@
       }
 
       const sortedCodes = Array.from(costCodes).sort();
-      const projectDatasets = data.map((project, index) => {
+      const projectDatasets = aggregatedProjects.map(({ project, aggregated }, index) => {
         const color = getColor(index);
-        const rowsByCode = {};
 
         const values = sortedCodes.map(code => {
-          const match = (project.budgetComparison || []).find(row => normalizeCostCodeLabel(row.cost_code) === code);
-          if (match) {
-            rowsByCode[code] = match;
-          }
+          const match = aggregated[code];
           if (!match) return null;
           const value = varianceMetric === 'percent'
             ? Number(match.variance_percent)
@@ -1077,7 +1151,7 @@
           backgroundColor: color.replace('1)', '0.72)'),
           borderColor: color,
           borderWidth: 1,
-          costCodeRows: rowsByCode
+          costCodeRows: aggregated
         };
       });
 
@@ -1120,7 +1194,7 @@
                   const code = context.label;
                   const row = context.dataset.costCodeRows?.[code];
                   const varianceValue = context.parsed.y;
-                  const costCodeLabel = formatComparisonCostCodeLabel(code);
+                  const costCodeLabel = formatGroupedCostCodeLabel(code);
                   const varianceLabel = varianceMetric === 'percent'
                     ? formatPercentVariance(varianceValue)
                     : Number.isFinite(varianceValue)
@@ -1641,7 +1715,7 @@
     }
 
     function getCategoryLabel(viewType, entry) {
-      if (viewType === 'costCode') return entry.cost_code;
+      if (viewType === 'costCode') return getGroupedCostCodeLabel(entry.cost_code);
       if (viewType === 'costCodeDivision') return formatCostCodeDivision(entry.cost_code);
       if (viewType === 'payClass') return entry.pay_class;
       if (viewType === 'job') return entry.job_description;
@@ -1675,6 +1749,314 @@
       return div.innerHTML;
     }
 
+    function loadStoredCostCodeGroups() {
+      try {
+        const stored = localStorage.getItem(costCodeGroupStorageKey);
+        if (!stored) {
+          costCodeGroupAssignments = {};
+          customCostCodeGroups = new Set();
+          return;
+        }
+
+        const parsed = JSON.parse(stored);
+        if (parsed && typeof parsed === 'object' && ('assignments' in parsed || 'groups' in parsed)) {
+          costCodeGroupAssignments = parsed.assignments || {};
+          customCostCodeGroups = new Set(parsed.groups || []);
+        } else {
+          costCodeGroupAssignments = parsed || {};
+          customCostCodeGroups = new Set();
+        }
+      } catch (error) {
+        console.warn('Unable to load saved cost code groups', error);
+        costCodeGroupAssignments = {};
+        customCostCodeGroups = new Set();
+      }
+    }
+
+    function persistCostCodeGroups() {
+      try {
+        const payload = {
+          assignments: costCodeGroupAssignments,
+          groups: Array.from(customCostCodeGroups)
+        };
+        localStorage.setItem(costCodeGroupStorageKey, JSON.stringify(payload));
+      } catch (error) {
+        console.warn('Unable to save cost code groups', error);
+      }
+    }
+
+    function loadStoredCostCodeGroupPresets() {
+      try {
+        const stored = localStorage.getItem(costCodeGroupPresetStorageKey);
+        savedCostCodeGroupPresets = stored ? JSON.parse(stored) || {} : {};
+      } catch (error) {
+        console.warn('Unable to load saved grouping presets', error);
+        savedCostCodeGroupPresets = {};
+      }
+    }
+
+    function persistCostCodeGroupPresets() {
+      try {
+        localStorage.setItem(costCodeGroupPresetStorageKey, JSON.stringify(savedCostCodeGroupPresets));
+      } catch (error) {
+        console.warn('Unable to save grouping presets', error);
+      }
+    }
+
+    function getCostCodeGroupingModel() {
+      const groups = {};
+      const ungrouped = [];
+
+      customCostCodeGroups.forEach(name => {
+        if (!groups[name]) groups[name] = new Set();
+      });
+
+      comparisonCostCodeList.forEach(code => {
+        const normalized = normalizeCostCodeLabel(code);
+        const groupName = costCodeGroupAssignments[normalized];
+
+        if (groupName) {
+          if (!groups[groupName]) groups[groupName] = new Set();
+          groups[groupName].add(code);
+        } else {
+          ungrouped.push(code);
+        }
+      });
+
+      return { groups, ungrouped };
+    }
+
+    function getGroupedCostCodeLabel(code) {
+      const normalized = normalizeCostCodeLabel(code);
+      return costCodeGroupAssignments[normalized] || normalized;
+    }
+
+    function formatGroupedCostCodeLabel(label) {
+      const { groups } = getCostCodeGroupingModel();
+      if (groups[label]) {
+        const members = Array.from(groups[label]).join(', ');
+        return `${label} (${members})`;
+      }
+      return formatComparisonCostCodeLabel(label);
+    }
+
+    function openCodeGroupingModal() {
+      if (!comparisonCostCodeList.length) {
+        alert('Load comparison data to manage groupings.');
+        return;
+      }
+
+      const modal = document.getElementById('codeGroupingModal');
+      modal.style.display = 'flex';
+      renderCodeGroupingModal();
+    }
+
+    function closeCodeGroupingModal() {
+      const modal = document.getElementById('codeGroupingModal');
+      modal.style.display = 'none';
+    }
+
+    function renderCodeGroupingModal() {
+      const container = document.getElementById('codeGroupingList');
+      const savedContainer = document.getElementById('savedGroupingList');
+      if (!container || !savedContainer) return;
+
+      const { groups, ungrouped } = getCostCodeGroupingModel();
+      const groupEntries = Object.entries(groups);
+
+      const savedPresetNames = Object.keys(savedCostCodeGroupPresets || {}).sort();
+      savedContainer.innerHTML = savedPresetNames.length
+        ? savedPresetNames.map(name => {
+            const encoded = encodeURIComponent(name);
+            return `
+              <div style="display: flex; justify-content: space-between; align-items: center; gap: 0.5rem; padding: 0.5rem 0.75rem; border: 1px solid var(--border-color); border-radius: 8px; background: var(--background);">
+                <div>
+                  <div style="font-weight: 600;">${escapeHtml(name)}</div>
+                  <div style="color: var(--text-secondary); font-size: 0.85rem;">${Object.keys(savedCostCodeGroupPresets[name]?.assignments || {}).length} assignments</div>
+                </div>
+                <div style="display: flex; gap: 0.4rem; flex-wrap: wrap;">
+                  <button class="btn btn-secondary" onclick="applySavedCostCodeGroupingPreset('${encoded}')">Load</button>
+                  <button class="btn" onclick="deleteSavedCostCodeGroupingPreset('${encoded}')">Delete</button>
+                </div>
+              </div>
+            `;
+          }).join('')
+        : '<div style="color: var(--text-secondary); font-size: 0.9rem;">No saved groupings yet.</div>';
+
+      if (!comparisonCostCodeList.length) {
+        container.innerHTML = '<p style="color: var(--text-secondary);">No cost codes available to group.</p>';
+        return;
+      }
+
+      const groupSections = groupEntries.map(([name, codes]) => `
+        <div class="card" style="padding: 0.75rem 1rem; border: 1px dashed var(--border-color);" data-group="${name}" ondragover="handleGroupDragOver(event)" ondrop="handleGroupDrop(event)">
+          <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 0.4rem;">
+            <div style="font-weight: 600;">${escapeHtml(name)}</div>
+            <div style="color: var(--text-secondary); font-size: 0.9rem;">${codes.size} code${codes.size === 1 ? '' : 's'}</div>
+          </div>
+          <div class="code-group-list" style="display: flex; gap: 0.5rem; flex-wrap: wrap; min-height: 36px;">
+            ${Array.from(codes).map(code => renderDraggableCodeChip(code)).join('') || '<span style="color: var(--text-secondary);">Drag codes here</span>'}
+          </div>
+        </div>
+      `).join('');
+
+      container.innerHTML = `
+        <div style="display: grid; gap: 0.75rem;">
+          ${groupSections || '<div style="color: var(--text-secondary);">No groups yet. Create one to start grouping.</div>'}
+          <div class="card" style="padding: 0.75rem 1rem; border: 1px dashed var(--border-color);" data-group="__ungrouped" ondragover="handleGroupDragOver(event)" ondrop="handleGroupDrop(event)">
+            <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 0.4rem;">
+              <div style="font-weight: 600;">Ungrouped codes</div>
+              <div style="color: var(--text-secondary); font-size: 0.9rem;">${ungrouped.length}</div>
+            </div>
+            <div class="code-group-list" style="display: flex; gap: 0.5rem; flex-wrap: wrap; min-height: 36px;">
+              ${ungrouped.map(code => renderDraggableCodeChip(code)).join('') || '<span style="color: var(--text-secondary);">All codes are grouped.</span>'}
+            </div>
+          </div>
+        </div>
+      `;
+
+      attachGroupingDragEvents();
+    }
+
+    function renderDraggableCodeChip(code) {
+      const label = formatComparisonCostCodeLabel(code);
+      return `<span class="chip" draggable="true" data-code="${escapeHtml(normalizeCostCodeLabel(code))}" ondragstart="handleCodeDragStart(event)" ondragend="handleCodeDragEnd(event)" title="${escapeHtml(label)}">${escapeHtml(label)}</span>`;
+    }
+
+    function attachGroupingDragEvents() {
+      const chips = document.querySelectorAll('#codeGroupingList [draggable="true"]');
+      chips.forEach(chip => {
+        chip.addEventListener('dragstart', handleCodeDragStart);
+        chip.addEventListener('dragend', handleCodeDragEnd);
+      });
+
+      const dropZones = document.querySelectorAll('#codeGroupingList [data-group]');
+      dropZones.forEach(zone => {
+        zone.addEventListener('dragover', handleGroupDragOver);
+        zone.addEventListener('drop', handleGroupDrop);
+      });
+    }
+
+    function handleCodeDragStart(event) {
+      activeCostCodeDrag = event.target?.dataset?.code;
+      event.dataTransfer.effectAllowed = 'move';
+    }
+
+    function handleCodeDragEnd() {
+      activeCostCodeDrag = null;
+    }
+
+    function handleGroupDragOver(event) {
+      event.preventDefault();
+      event.dataTransfer.dropEffect = 'move';
+    }
+
+    function handleGroupDrop(event) {
+      event.preventDefault();
+      const code = activeCostCodeDrag || event.dataTransfer.getData('text/plain');
+      const targetGroup = event.currentTarget?.dataset?.group;
+      moveCodeToGroup(code, targetGroup === '__ungrouped' ? null : targetGroup);
+    }
+
+    function moveCodeToGroup(code, targetGroup = null) {
+      if (!code) return;
+
+      const normalized = normalizeCostCodeLabel(code);
+      if (targetGroup) {
+        customCostCodeGroups.add(targetGroup);
+        costCodeGroupAssignments[normalized] = targetGroup;
+      } else {
+        delete costCodeGroupAssignments[normalized];
+      }
+
+      persistCostCodeGroups();
+      renderCodeGroupingModal();
+      updateCharts();
+    }
+
+    function promptNewCostCodeGroup() {
+      const name = prompt('Enter a name for the new group');
+      if (!name) return;
+
+      const trimmed = name.trim();
+      if (!trimmed) return;
+
+      const { groups } = getCostCodeGroupingModel();
+      if (groups[trimmed]) {
+        alert('A group with that name already exists.');
+        return;
+      }
+
+      customCostCodeGroups.add(trimmed);
+      persistCostCodeGroups();
+      renderCodeGroupingModal();
+    }
+
+    function resetCostCodeGroups() {
+      costCodeGroupAssignments = {};
+      customCostCodeGroups = new Set();
+      persistCostCodeGroups();
+      renderCodeGroupingModal();
+      updateCharts();
+    }
+
+    function getCostCodeGroupingSnapshot() {
+      return {
+        assignments: { ...costCodeGroupAssignments },
+        groups: Array.from(customCostCodeGroups)
+      };
+    }
+
+    function saveCostCodeGroupingPreset() {
+      const snapshot = getCostCodeGroupingSnapshot();
+      const hasAssignments = Object.keys(snapshot.assignments).length > 0 || snapshot.groups.length > 0;
+
+      if (!hasAssignments) {
+        alert('Create at least one grouping before saving.');
+        return;
+      }
+
+      const name = prompt('Enter a name for this grouping preset');
+      if (!name) return;
+
+      const trimmed = name.trim();
+      if (!trimmed) return;
+
+      if (savedCostCodeGroupPresets[trimmed]) {
+        const confirmed = confirm('A preset with this name exists. Overwrite it?');
+        if (!confirmed) return;
+      }
+
+      savedCostCodeGroupPresets[trimmed] = snapshot;
+      persistCostCodeGroupPresets();
+      renderCodeGroupingModal();
+    }
+
+    function applySavedCostCodeGroupingPreset(encodedName) {
+      const name = decodeURIComponent(encodedName || '');
+      const preset = savedCostCodeGroupPresets[name];
+      if (!preset) return;
+
+      costCodeGroupAssignments = { ...(preset.assignments || {}) };
+      customCostCodeGroups = new Set(preset.groups || []);
+
+      persistCostCodeGroups();
+      renderCodeGroupingModal();
+      updateCharts();
+    }
+
+    function deleteSavedCostCodeGroupingPreset(encodedName) {
+      const name = decodeURIComponent(encodedName || '');
+      if (!name || !savedCostCodeGroupPresets[name]) return;
+
+      const confirmed = confirm(`Delete the saved grouping "${name}"?`);
+      if (!confirmed) return;
+
+      delete savedCostCodeGroupPresets[name];
+      persistCostCodeGroupPresets();
+      renderCodeGroupingModal();
+    }
+
     // Code Mapping Modal Functions
     async function openCodeMappingModal() {
       if (!comparisonData || !comparisonData.length) {
@@ -1695,7 +2077,7 @@
 
     async function loadCodeMappings() {
       const container = document.getElementById('codeMappingProjects');
-      container.innerHTML = '<p style="text-align: center; padding: 2rem;">Loading mappings...</p>';
+      container.innerHTML = '<p style="text-align: center; padding: 2rem;">Loading matches...</p>';
 
       try {
         // Load mappings for each project
@@ -1710,8 +2092,8 @@
         mergeMappedCostCodeNames(projectMappings);
         renderCodeMappings(projectMappings);
       } catch (error) {
-        console.error('Error loading code mappings:', error);
-        container.innerHTML = '<p style="color: var(--danger-color); text-align: center;">Error loading mappings</p>';
+        console.error('Error loading code matching:', error);
+        container.innerHTML = '<p style="color: var(--danger-color); text-align: center;">Error loading matches</p>';
       }
     }
 
@@ -1932,8 +2314,8 @@
         await loadCodeMappings();
         await loadComparison();
       } catch (error) {
-        console.error('Error updating mapping:', error);
-        alert('Error updating mapping. Please try again.');
+        console.error('Error updating match:', error);
+        alert('Error updating match. Please try again.');
       }
     }
 
@@ -1959,7 +2341,7 @@
         });
 
         if (!response.ok) {
-          throw new Error('Failed to save mapping');
+          throw new Error('Failed to save match');
         }
 
         await loadCodeMappings();
@@ -1970,15 +2352,15 @@
           actualCodeSelect.value = '';
         }
       } catch (error) {
-        console.error('Error saving code mapping:', error);
+        console.error('Error saving code match:', error);
         if (!options.skipValidation) {
-          alert('Error saving mapping. Please try again.');
+          alert('Error saving match. Please try again.');
         }
       }
     }
 
     async function deleteCodeMapping(projectId, budgetCode, options = {}) {
-      if (!options.skipConfirm && !confirm(`Delete mapping for budget code "${budgetCode}"?`)) {
+      if (!options.skipConfirm && !confirm(`Delete match for budget code "${budgetCode}"?`)) {
         return;
       }
 
@@ -1988,15 +2370,15 @@
         });
 
         if (!response.ok) {
-          throw new Error('Failed to delete mapping');
+          throw new Error('Failed to delete match');
         }
 
         await loadCodeMappings();
         await loadComparison();
       } catch (error) {
-        console.error('Error deleting code mapping:', error);
+        console.error('Error deleting code match:', error);
         if (!options.skipConfirm) {
-          alert('Error deleting mapping. Please try again.');
+          alert('Error deleting match. Please try again.');
         }
       }
     }
