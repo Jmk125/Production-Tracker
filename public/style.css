@@ -432,6 +432,12 @@ nav a:hover, nav a.active {
   border: 1px solid #fecaca;
 }
 
+.alert-warning {
+  background-color: #fef9c3;
+  color: #92400e;
+  border: 1px solid #fcd34d;
+}
+
 .checkbox-group {
   max-height: 300px;
   overflow-y: auto;
