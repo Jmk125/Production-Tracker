@@ -80,6 +80,11 @@ async function parsePayrollPDF(filePath) {
       const jobDescription = (parts[6] || '').trim();
       const costCode = entryMatch ? parts[7] : null;
 
+      if (hoursIsNegative) {
+        ignoredLines.push(`${line.trim()} (ignored negative hours)`);
+        continue;
+      }
+
       entries.push({
         employee_name: currentEmployee,
         pay_id: payId,
