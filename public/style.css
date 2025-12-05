@@ -699,6 +699,54 @@ nav a:hover, nav a.active {
   cursor: pointer;
 }
 
+.multiselect {
+  position: relative;
+  display: inline-flex;
+  align-items: center;
+}
+
+.multiselect-toggle {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.35rem;
+  cursor: pointer;
+  border: 1px solid var(--border-color);
+}
+
+.multiselect .chevron {
+  font-size: 0.75rem;
+  color: var(--text-secondary);
+}
+
+.multiselect-menu {
+  position: absolute;
+  top: calc(100% + 0.35rem);
+  right: 0;
+  background: #fff;
+  border: 1px solid var(--border-color);
+  border-radius: 0.5rem;
+  box-shadow: var(--shadow-lg);
+  padding: 0.75rem;
+  min-width: 220px;
+  z-index: 10;
+}
+
+.multiselect-options {
+  display: flex;
+  flex-direction: column;
+  gap: 0.35rem;
+  max-height: 260px;
+  overflow-y: auto;
+}
+
+.multiselect-options .checkbox {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.4rem;
+  color: var(--text-secondary);
+  font-size: 0.9rem;
+}
+
 .empty-filter {
   color: var(--text-secondary);
   font-size: 0.9rem;

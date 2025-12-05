@@ -145,17 +145,40 @@ const projectQueries = {
 
 // Upload queries
 const uploadQueries = {
-  create: async (project_id, filename) => {
+  create: async (project_id, filename, metrics = {}) => {
     const uploads = readJSON(UPLOADS_FILE);
     const newUpload = {
       id: uploads.length > 0 ? Math.max(...uploads.map(u => u.id)) + 1 : 1,
       project_id: parseInt(project_id),
       filename,
-      upload_date: new Date().toISOString()
+      upload_date: new Date().toISOString(),
+      parsed_hours: metrics.parsed_hours ?? null,
+      detected_total_hours: metrics.detected_total_hours ?? null,
+      variance_hours: metrics.variance_hours ?? null,
+      entries_found: metrics.entries_found ?? null,
+      entries_inserted: metrics.entries_inserted ?? null
     };
     uploads.push(newUpload);
     writeJSON(UPLOADS_FILE, uploads);
     return { lastID: newUpload.id };
+  },
+
+  updateMetrics: async (id, metrics = {}) => {
+    const uploads = readJSON(UPLOADS_FILE);
+    const index = uploads.findIndex(u => u.id === parseInt(id));
+    if (index === -1) return null;
+
+    uploads[index] = {
+      ...uploads[index],
+      parsed_hours: metrics.parsed_hours ?? uploads[index].parsed_hours ?? null,
+      detected_total_hours: metrics.detected_total_hours ?? uploads[index].detected_total_hours ?? null,
+      variance_hours: metrics.variance_hours ?? uploads[index].variance_hours ?? null,
+      entries_found: metrics.entries_found ?? uploads[index].entries_found ?? null,
+      entries_inserted: metrics.entries_inserted ?? uploads[index].entries_inserted ?? null
+    };
+
+    writeJSON(UPLOADS_FILE, uploads);
+    return uploads[index];
   },
 
   getByProject: async (project_id) => {

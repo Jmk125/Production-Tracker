@@ -546,14 +546,25 @@ app.post('/api/projects/:id/upload', upload.single('payroll'), async (req, res) 
       return res.status(400).json({ error: 'No file uploaded' });
     }
     
-    // Create upload record
-    const uploadResult = await uploadQueries.create(projectId, file.originalname);
-    const uploadId = uploadResult.lastID;
-    
-    // Parse PDF
+    // Parse PDF first so we can store metadata with the upload
     console.log('Parsing PDF:', file.path);
     const { entries = [], summary = {} } = await parsePayrollPDF(file.path);
     console.log(`Extracted ${entries.length} time entries`);
+
+    const parsedHours = Number(summary.parsedHours ?? 0);
+    const detectedTotal = summary.detectedTotalHours ?? null;
+    const varianceHours = (detectedTotal !== null && detectedTotal !== undefined)
+      ? parsedHours - Number(detectedTotal)
+      : null;
+
+    // Create upload record with summary metrics
+    const uploadResult = await uploadQueries.create(projectId, file.originalname, {
+      parsed_hours: parsedHours,
+      detected_total_hours: detectedTotal,
+      variance_hours: varianceHours,
+      entries_found: entries.length
+    });
+    const uploadId = uploadResult.lastID;
     
     // Prepare entries for batch insert
     console.log('Inserting entries into database...');
@@ -575,14 +586,23 @@ app.post('/api/projects/:id/upload', upload.single('payroll'), async (req, res) 
     // Batch insert all entries at once
     const inserted = await timeEntryQueries.createBatch(entryDataArray);
     console.log(`Successfully inserted ${inserted} entries`);
+
+    await uploadQueries.updateMetrics(uploadId, {
+      parsed_hours: parsedHours,
+      detected_total_hours: detectedTotal,
+      variance_hours: varianceHours,
+      entries_found: entries.length,
+      entries_inserted: inserted
+    });
     
     res.json({
       success: true,
       uploadId,
       entriesFound: entries.length,
       entriesInserted: inserted,
-      parsedHours: summary.parsedHours ?? null,
-      detectedTotalHours: summary.detectedTotalHours ?? null,
+      parsedHours: parsedHours,
+      detectedTotalHours: detectedTotal,
+      varianceHours: varianceHours,
       ignoredLines: summary.ignoredLines?.slice(0, 15) || []
     });
   } catch (error) {
