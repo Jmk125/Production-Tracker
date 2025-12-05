@@ -134,7 +134,7 @@
         <div class="card project-card" onclick="viewProject(${project.id})">
           <h3>${escapeHtml(project.name)}</h3>
           <div class="project-meta">
-            ${project.size ? `<span>📏 ${project.size} ${project.size_unit || ''}</span>` : ''}
+            ${project.size ? `<span>📏 ${formatNumber(project.size)} ${project.size_unit || ''}</span>` : ''}
             ${project.start_date ? `<span>📅 ${formatDate(project.start_date)}</span>` : ''}
           </div>
           ${project.notes ? `<p style="margin-top: 0.75rem; color: var(--text-secondary); font-size: 0.875rem;">${escapeHtml(project.notes)}</p>` : ''}
@@ -259,7 +259,13 @@
     function formatDate(dateStr) {
       if (!dateStr) return '';
       const date = new Date(dateStr + 'T00:00:00');
-      return date.toLocaleDateString('en-US', { month: 'short', day: 'numeric', year: 'numeric' });
+      return date.toLocaleDateString('en-US', { month: 'short', year: 'numeric' });
+    }
+
+    function formatNumber(value) {
+      const num = Number(value);
+      if (Number.isNaN(num)) return value;
+      return num.toLocaleString();
     }
 
     function escapeHtml(text) {

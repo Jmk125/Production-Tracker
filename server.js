@@ -595,7 +595,28 @@ app.post('/api/projects/:id/upload', upload.single('payroll'), async (req, res) 
       entries_found: entries.length,
       entries_inserted: inserted
     });
-    
+
+    // Set project timeline if missing using the first and last payroll months
+    if (entries.length > 0) {
+      const entryDates = entries
+        .map(e => new Date(e.date))
+        .filter(d => !Number.isNaN(d));
+
+      if (entryDates.length > 0) {
+        const minDate = new Date(Math.min(...entryDates));
+        const maxDate = new Date(Math.max(...entryDates));
+
+        const start_date = new Date(minDate.getFullYear(), minDate.getMonth(), 1)
+          .toISOString()
+          .split('T')[0];
+        const end_date = new Date(maxDate.getFullYear(), maxDate.getMonth() + 1, 0)
+          .toISOString()
+          .split('T')[0];
+
+        await projectQueries.updateDatesIfMissing(projectId, { start_date, end_date });
+      }
+    }
+
     res.json({
       success: true,
       uploadId,
@@ -845,7 +866,14 @@ app.post('/api/comparison/timeline', async (req, res) => {
     
     const comparisonData = await Promise.all(
       projectIds.map(async (projectId) => {
-        const { entries, rawEntries, projectStartDate, employeeStats } = await comparisonQueries.getProjectTimeline(projectId);
+        const {
+          entries,
+          rawEntries,
+          projectStartDate,
+          projectSize,
+          projectSizeUnit,
+          employeeStats
+        } = await comparisonQueries.getProjectTimeline(projectId);
         const { comparison: budgetComparison, costCodeNames } = await buildBudgetComparison(projectId);
 
         const totalBudgetHours = budgetComparison.reduce((sum, row) => sum + (Number(row.budget_hours) || 0), 0);
@@ -856,6 +884,8 @@ app.post('/api/comparison/timeline', async (req, res) => {
           data: entries,
           rawEntries,
           projectStartDate,
+          projectSize,
+          projectSizeUnit,
           employeeStats,
           budgetComparison,
           costCodeNames,
