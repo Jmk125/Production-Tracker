@@ -546,14 +546,25 @@ app.post('/api/projects/:id/upload', upload.single('payroll'), async (req, res) 
       return res.status(400).json({ error: 'No file uploaded' });
     }
     
-    // Create upload record
-    const uploadResult = await uploadQueries.create(projectId, file.originalname);
-    const uploadId = uploadResult.lastID;
-    
-    // Parse PDF
+    // Parse PDF first so we can store metadata with the upload
     console.log('Parsing PDF:', file.path);
     const { entries = [], summary = {} } = await parsePayrollPDF(file.path);
     console.log(`Extracted ${entries.length} time entries`);
+
+    const parsedHours = Number(summary.parsedHours ?? 0);
+    const detectedTotal = summary.detectedTotalHours ?? null;
+    const varianceHours = (detectedTotal !== null && detectedTotal !== undefined)
+      ? parsedHours - Number(detectedTotal)
+      : null;
+
+    // Create upload record with summary metrics
+    const uploadResult = await uploadQueries.create(projectId, file.originalname, {
+      parsed_hours: parsedHours,
+      detected_total_hours: detectedTotal,
+      variance_hours: varianceHours,
+      entries_found: entries.length
+    });
+    const uploadId = uploadResult.lastID;
     
     // Prepare entries for batch insert
     console.log('Inserting entries into database...');
@@ -569,20 +580,30 @@ app.post('/api/projects/:id/upload', upload.single('payroll'), async (req, res) 
       hours: entry.hours,
       rate: entry.rate,
       cost_code: entry.cost_code,
-      job_description: entry.job_description
+      job_description: entry.job_description,
+      included: entry.included !== false
     }));
     
     // Batch insert all entries at once
     const inserted = await timeEntryQueries.createBatch(entryDataArray);
     console.log(`Successfully inserted ${inserted} entries`);
+
+    await uploadQueries.updateMetrics(uploadId, {
+      parsed_hours: parsedHours,
+      detected_total_hours: detectedTotal,
+      variance_hours: varianceHours,
+      entries_found: entries.length,
+      entries_inserted: inserted
+    });
     
     res.json({
       success: true,
       uploadId,
       entriesFound: entries.length,
       entriesInserted: inserted,
-      parsedHours: summary.parsedHours ?? null,
-      detectedTotalHours: summary.detectedTotalHours ?? null,
+      parsedHours: parsedHours,
+      detectedTotalHours: detectedTotal,
+      varianceHours: varianceHours,
       ignoredLines: summary.ignoredLines?.slice(0, 15) || []
     });
   } catch (error) {
@@ -595,20 +616,29 @@ app.post('/api/projects/:id/upload', upload.single('payroll'), async (req, res) 
 app.patch('/api/entries/:id', async (req, res) => {
   try {
     const entryId = parseInt(req.params.id);
-    const { cost_code, job_description } = req.body || {};
+    const { cost_code, job_description, included } = req.body || {};
 
-    if (!cost_code || typeof cost_code !== 'string' || !cost_code.trim()) {
-      return res.status(400).json({ error: 'A cost code is required' });
+    const updates = {};
+
+    if (cost_code !== undefined) {
+      if (typeof cost_code !== 'string' || !cost_code.trim()) {
+        return res.status(400).json({ error: 'A cost code is required' });
+      }
+      updates.cost_code = cost_code.trim();
     }
-
-    const updates = {
-      cost_code: cost_code.trim()
-    };
 
     if (job_description !== undefined) {
       updates.job_description = typeof job_description === 'string'
         ? job_description.trim()
         : job_description;
+    }
+
+    if (included !== undefined) {
+      updates.included = Boolean(included);
+    }
+
+    if (Object.keys(updates).length === 0) {
+      return res.status(400).json({ error: 'No updates provided' });
     }
 
     const updated = await timeEntryQueries.updateEntry(entryId, updates);
