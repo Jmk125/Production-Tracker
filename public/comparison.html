@@ -257,8 +257,10 @@
     let applyCostCodeFiltersToMetrics = true;
     let customCostCodeGroups = new Set();
     let costCodeGroupAssignments = {};
+    let savedCostCodeGroupPresets = {};
     let activeCostCodeDrag = null;
     const costCodeGroupStorageKey = 'comparisonCostCodeGroups';
+    const costCodeGroupPresetStorageKey = 'comparisonCostCodeGroupPresets';
     const chartColors = [
       'rgba(37, 99, 235, 1)',
       'rgba(34, 197, 94, 1)',
@@ -274,6 +276,7 @@
     document.addEventListener('DOMContentLoaded', () => {
       enforceSingleTimelineControls();
       loadStoredCostCodeGroups();
+      loadStoredCostCodeGroupPresets();
       loadProjects();
     });
 
@@ -1772,6 +1775,24 @@
       }
     }
 
+    function loadStoredCostCodeGroupPresets() {
+      try {
+        const stored = localStorage.getItem(costCodeGroupPresetStorageKey);
+        savedCostCodeGroupPresets = stored ? JSON.parse(stored) || {} : {};
+      } catch (error) {
+        console.warn('Unable to load saved grouping presets', error);
+        savedCostCodeGroupPresets = {};
+      }
+    }
+
+    function persistCostCodeGroupPresets() {
+      try {
+        localStorage.setItem(costCodeGroupPresetStorageKey, JSON.stringify(savedCostCodeGroupPresets));
+      } catch (error) {
+        console.warn('Unable to save grouping presets', error);
+      }
+    }
+
     function getCostCodeGroupingModel() {
       const groups = {};
       const ungrouped = [];
@@ -1827,10 +1848,30 @@
 
     function renderCodeGroupingModal() {
       const container = document.getElementById('codeGroupingList');
-      if (!container) return;
+      const savedContainer = document.getElementById('savedGroupingList');
+      if (!container || !savedContainer) return;
 
       const { groups, ungrouped } = getCostCodeGroupingModel();
       const groupEntries = Object.entries(groups);
+
+      const savedPresetNames = Object.keys(savedCostCodeGroupPresets || {}).sort();
+      savedContainer.innerHTML = savedPresetNames.length
+        ? savedPresetNames.map(name => {
+            const encoded = encodeURIComponent(name);
+            return `
+              <div style="display: flex; justify-content: space-between; align-items: center; gap: 0.5rem; padding: 0.5rem 0.75rem; border: 1px solid var(--border-color); border-radius: 8px; background: var(--background);">
+                <div>
+                  <div style="font-weight: 600;">${escapeHtml(name)}</div>
+                  <div style="color: var(--text-secondary); font-size: 0.85rem;">${Object.keys(savedCostCodeGroupPresets[name]?.assignments || {}).length} assignments</div>
+                </div>
+                <div style="display: flex; gap: 0.4rem; flex-wrap: wrap;">
+                  <button class="btn btn-secondary" onclick="applySavedCostCodeGroupingPreset('${encoded}')">Load</button>
+                  <button class="btn" onclick="deleteSavedCostCodeGroupingPreset('${encoded}')">Delete</button>
+                </div>
+              </div>
+            `;
+          }).join('')
+        : '<div style="color: var(--text-secondary); font-size: 0.9rem;">No saved groupings yet.</div>';
 
       if (!comparisonCostCodeList.length) {
         container.innerHTML = '<p style="color: var(--text-secondary);">No cost codes available to group.</p>';
@@ -1947,6 +1988,63 @@
       persistCostCodeGroups();
       renderCodeGroupingModal();
       updateCharts();
+    }
+
+    function getCostCodeGroupingSnapshot() {
+      return {
+        assignments: { ...costCodeGroupAssignments },
+        groups: Array.from(customCostCodeGroups)
+      };
+    }
+
+    function saveCostCodeGroupingPreset() {
+      const snapshot = getCostCodeGroupingSnapshot();
+      const hasAssignments = Object.keys(snapshot.assignments).length > 0 || snapshot.groups.length > 0;
+
+      if (!hasAssignments) {
+        alert('Create at least one grouping before saving.');
+        return;
+      }
+
+      const name = prompt('Enter a name for this grouping preset');
+      if (!name) return;
+
+      const trimmed = name.trim();
+      if (!trimmed) return;
+
+      if (savedCostCodeGroupPresets[trimmed]) {
+        const confirmed = confirm('A preset with this name exists. Overwrite it?');
+        if (!confirmed) return;
+      }
+
+      savedCostCodeGroupPresets[trimmed] = snapshot;
+      persistCostCodeGroupPresets();
+      renderCodeGroupingModal();
+    }
+
+    function applySavedCostCodeGroupingPreset(encodedName) {
+      const name = decodeURIComponent(encodedName || '');
+      const preset = savedCostCodeGroupPresets[name];
+      if (!preset) return;
+
+      costCodeGroupAssignments = { ...(preset.assignments || {}) };
+      customCostCodeGroups = new Set(preset.groups || []);
+
+      persistCostCodeGroups();
+      renderCodeGroupingModal();
+      updateCharts();
+    }
+
+    function deleteSavedCostCodeGroupingPreset(encodedName) {
+      const name = decodeURIComponent(encodedName || '');
+      if (!name || !savedCostCodeGroupPresets[name]) return;
+
+      const confirmed = confirm(`Delete the saved grouping "${name}"?`);
+      if (!confirmed) return;
+
+      delete savedCostCodeGroupPresets[name];
+      persistCostCodeGroupPresets();
+      renderCodeGroupingModal();
     }
 
     // Code Mapping Modal Functions
