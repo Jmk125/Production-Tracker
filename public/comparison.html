@@ -142,6 +142,13 @@
               <div style="color: var(--text-secondary); font-size: 0.9rem;">Spent vs. budgeted hours by cost code</div>
             </div>
             <div style="display: flex; gap: 1rem; align-items: center; flex-wrap: wrap; justify-content: flex-end;">
+              <div style="display: flex; align-items: center; gap: 0.4rem;">
+                <label for="varianceMetricSelect" style="font-size: 0.9rem; color: var(--text-secondary); white-space: nowrap;">View</label>
+                <select id="varianceMetricSelect" onchange="renderCostCodeVarianceChart(getFilteredComparisonData())">
+                  <option value="hours" selected>Variance (hours)</option>
+                  <option value="percent">Variance (%)</option>
+                </select>
+              </div>
               <button class="btn btn-secondary" onclick="openCodeMappingModal()" style="font-size: 0.875rem;">
                 Manage Code Mappings
               </button>
@@ -1008,6 +1015,7 @@
       const card = document.getElementById('costCodeVarianceCard');
       const showAverageBar = document.getElementById('showVarianceAverageBar')?.checked;
       const averageOnlyToggle = document.getElementById('varianceAverageOnlyToggle');
+      const varianceMetric = document.getElementById('varianceMetricSelect')?.value === 'percent' ? 'percent' : 'hours';
       const averageOnly = !!showAverageBar && !!averageOnlyToggle?.checked;
 
       if (averageOnlyToggle) {
@@ -1056,7 +1064,11 @@
           if (match) {
             rowsByCode[code] = match;
           }
-          return match ? Number(match.variance_hours) || 0 : null;
+          if (!match) return null;
+          const value = varianceMetric === 'percent'
+            ? Number(match.variance_percent)
+            : Number(match.variance_hours);
+          return Number.isFinite(value) ? value : null;
         });
 
         return {
@@ -1082,6 +1094,7 @@
       const allValues = datasets.flatMap(ds => ds.data.filter(v => Number.isFinite(v)));
       const suggestedMin = allValues.length ? Math.min(0, Math.min(...allValues) * 1.1) : 0;
       const suggestedMax = allValues.length ? Math.max(0, Math.max(...allValues) * 1.1) : 0;
+      const yAxisLabel = varianceMetric === 'percent' ? 'Variance (%)' : 'Variance (hrs)';
 
       container.innerHTML = `
         <div class="chart-container" style="min-height: 380px;">
@@ -1106,22 +1119,31 @@
                 label: (context) => {
                   const code = context.label;
                   const row = context.dataset.costCodeRows?.[code];
-                  const varianceHours = context.parsed.y;
+                  const varianceValue = context.parsed.y;
                   const costCodeLabel = formatComparisonCostCodeLabel(code);
-                  const varianceLabel = Number.isFinite(varianceHours)
-                    ? varianceHours.toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })
-                    : '—';
+                  const varianceLabel = varianceMetric === 'percent'
+                    ? formatPercentVariance(varianceValue)
+                    : Number.isFinite(varianceValue)
+                      ? `${varianceValue.toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })} hrs`
+                      : '—';
 
                   if (context.dataset.isAverageBar) {
-                    return `${context.dataset.label} – ${costCodeLabel}: ${varianceLabel} hrs`;
+                    return `${context.dataset.label} – ${costCodeLabel}: ${varianceLabel}`;
                   }
 
-                  if (!row) return `${context.dataset.label}: ${varianceLabel} hrs`;
+                  if (!row) return `${context.dataset.label}: ${varianceLabel}`;
 
                   const budget = formatHours(row.budget_hours);
                   const actual = formatHours(row.actual_hours);
                   const percent = formatPercentVariance(row.variance_percent);
-                  return `${context.dataset.label} – ${costCodeLabel}: ${varianceLabel} hrs (Budget: ${budget}, Spent: ${actual}, %: ${percent})`;
+                  if (varianceMetric === 'percent') {
+                    const hoursDelta = Number.isFinite(row.variance_hours)
+                      ? `${Number(row.variance_hours).toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })} hrs`
+                      : '—';
+                    return `${context.dataset.label} – ${costCodeLabel}: ${varianceLabel} (Budget: ${budget}, Spent: ${actual}, Δ Hours: ${hoursDelta})`;
+                  }
+
+                  return `${context.dataset.label} – ${costCodeLabel}: ${varianceLabel} (Budget: ${budget}, Spent: ${actual}, %: ${percent})`;
                 }
               }
             }
@@ -1136,9 +1158,14 @@
               }
             },
             y: {
-              title: { display: true, text: 'Variance (hrs)' },
+              title: { display: true, text: yAxisLabel },
               suggestedMin,
-              suggestedMax
+              suggestedMax,
+              ticks: varianceMetric === 'percent'
+                ? {
+                  callback: (value) => `${value}%`
+                }
+                : undefined
             }
           }
         }
