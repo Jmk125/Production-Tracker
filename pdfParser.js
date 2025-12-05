@@ -42,9 +42,14 @@ async function parsePayrollPDF(filePath) {
     }
     
     // Capture reported totals for later reconciliation
-    const totalLineMatch = line.match(/total\s+hours\s+([\d.,]+)/i) || line.match(/grand\s+total\s+([\d.,]+)/i);
-    if (totalLineMatch) {
-      detectedTotals.push(parseNumber(totalLineMatch[1]));
+    if (/total\s+hours/i.test(line) || /grand\s+totals?/i.test(line)) {
+      const numberMatches = line.match(/([\d]+[\d.,]*)/g) || [];
+      numberMatches.forEach(num => {
+        const parsed = parseNumber(num);
+        if (parsed > 0) {
+          detectedTotals.push(parsed);
+        }
+      });
     }
 
     // Check for time entry line - made more flexible

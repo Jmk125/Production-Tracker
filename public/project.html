@@ -1319,16 +1319,43 @@
         return;
       }
 
-      container.innerHTML = uploads.map(upload => `
-        <div class="file-item">
-          <div>
-            <div style="font-weight: 500;">${escapeHtml(upload.filename)}</div>
-            <div style="font-size: 0.813rem; color: var(--text-secondary);">
-              ${new Date(upload.upload_date).toLocaleString()}
+      container.innerHTML = uploads.map(upload => {
+        const hasParsed = upload.parsed_hours !== null && upload.parsed_hours !== undefined;
+        const parsedHours = hasParsed ? Number(upload.parsed_hours) : null;
+        const detectedTotal = upload.detected_total_hours;
+        const variance = upload.variance_hours;
+
+        const hasDetected = detectedTotal !== null && detectedTotal !== undefined && !Number.isNaN(Number(detectedTotal));
+        const hasVariance = variance !== null && variance !== undefined && !Number.isNaN(Number(variance));
+
+        const varianceText = hasVariance
+          ? `<div style="font-size: 0.875rem;">${renderVarianceDelta(variance)}</div>`
+          : '';
+
+        const detectedText = hasDetected
+          ? `<div style="font-size: 0.875rem; color: var(--text-secondary);">PDF total ${formatHours(Number(detectedTotal))} hrs</div>`
+          : '';
+
+        const parsedText = hasParsed
+          ? `<div style="font-size: 0.875rem; color: var(--text-secondary);">Imported ${formatHours(parsedHours)} hrs</div>`
+          : '';
+
+        return `
+          <div class="file-item">
+            <div>
+              <div style="font-weight: 500;">${escapeHtml(upload.filename)}</div>
+              <div style="font-size: 0.813rem; color: var(--text-secondary);">
+                ${new Date(upload.upload_date).toLocaleString()}
+              </div>
+              <div style="margin-top: 0.35rem; display: grid; gap: 0.1rem;">
+                ${parsedText}
+                ${detectedText}
+                ${varianceText}
+              </div>
             </div>
           </div>
-        </div>
-      `).join('');
+        `;
+      }).join('');
     }
 
     function renderRecentUploads(uploads) {
@@ -1340,14 +1367,21 @@
         return;
       }
 
-      container.innerHTML = recent.map(upload => `
-        <div style="padding: 0.75rem 0; border-bottom: 1px solid var(--border-color);">
-          <div style="font-size: 0.875rem; font-weight: 500;">${escapeHtml(upload.filename)}</div>
-          <div style="font-size: 0.75rem; color: var(--text-secondary);">
-            ${new Date(upload.upload_date).toLocaleString()}
+      container.innerHTML = recent.map(upload => {
+        const varianceText = (upload.variance_hours !== null && upload.variance_hours !== undefined)
+          ? renderVarianceDelta(upload.variance_hours, { compact: true })
+          : '';
+
+        return `
+          <div style="padding: 0.75rem 0; border-bottom: 1px solid var(--border-color);">
+            <div style="font-size: 0.875rem; font-weight: 500;">${escapeHtml(upload.filename)}</div>
+            <div style="font-size: 0.75rem; color: var(--text-secondary);">
+              ${new Date(upload.upload_date).toLocaleString()}
+            </div>
+            ${varianceText ? `<div style="margin-top: 0.2rem;">${varianceText}</div>` : ''}
           </div>
-        </div>
-      `).join('');
+        `;
+      }).join('');
     }
 
     function renderBudgetUploads(uploads) {
@@ -3093,6 +3127,22 @@
       const sign = value > 0 ? '+' : '';
       const color = value > 0 ? '#ef4444' : value < 0 ? '#22c55e' : '#0f172a';
       return `<span style="font-weight: 700; color: ${color};">${sign}${Number(value || 0).toFixed(2)}</span>`;
+    }
+
+    function renderVarianceDelta(value, { compact = false } = {}) {
+      if (value === null || value === undefined || Number.isNaN(Number(value))) return '';
+
+      const numeric = Number(value);
+      const magnitude = Math.abs(numeric);
+      const sign = numeric > 0 ? '+' : '';
+      const color = magnitude < 0.01
+        ? 'var(--text-secondary)'
+        : numeric > 0
+          ? '#166534'
+          : '#991b1b';
+
+      const label = compact ? '' : 'Variance: ';
+      return `<span style="color: ${color}; font-weight: 700;">${label}${sign}${magnitude < 0.01 ? '0.00' : numeric.toFixed(2)} hrs</span>`;
     }
 
     function formatPercentVariance(value) {
