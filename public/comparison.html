@@ -233,7 +233,17 @@
         </p>
         <div style="display: flex; gap: 0.75rem; flex-wrap: wrap; margin-bottom: 1rem;">
           <button class="btn btn-secondary" onclick="promptNewCostCodeGroup()">New Group</button>
+          <button class="btn btn-primary" onclick="saveCostCodeGroupingPreset()">Save Grouping</button>
           <button class="btn" onclick="resetCostCodeGroups()">Reset Groupings</button>
+        </div>
+        <div class="card" style="margin-bottom: 1rem;">
+          <div style="display: flex; justify-content: space-between; align-items: center; flex-wrap: wrap; gap: 0.75rem;">
+            <div>
+              <div style="font-weight: 600;">Saved groupings</div>
+              <div style="color: var(--text-secondary); font-size: 0.9rem;">Save, load, or remove grouping presets.</div>
+            </div>
+            <div id="savedGroupingList" style="display: flex; flex-direction: column; gap: 0.35rem; width: 100%; max-width: 520px;"></div>
+          </div>
         </div>
         <div id="codeGroupingList"></div>
       </div>
@@ -406,6 +416,7 @@
       renderCostCodeList();
       updateCostCodeMasterCheckboxes();
       toggleFilterPanelVisibility(true);
+      renderCodeGroupingModal();
     }
 
     function renderCostCodeList() {
@@ -1778,7 +1789,8 @@
     function loadStoredCostCodeGroupPresets() {
       try {
         const stored = localStorage.getItem(costCodeGroupPresetStorageKey);
-        savedCostCodeGroupPresets = stored ? JSON.parse(stored) || {} : {};
+        const parsed = stored ? JSON.parse(stored) : {};
+        savedCostCodeGroupPresets = parsed && typeof parsed === 'object' ? parsed : {};
       } catch (error) {
         console.warn('Unable to load saved grouping presets', error);
         savedCostCodeGroupPresets = {};
@@ -1831,6 +1843,10 @@
     }
 
     function openCodeGroupingModal() {
+      if (!comparisonCostCodeList.length && comparisonData.length) {
+        initializeCostCodeFilters();
+      }
+
       if (!comparisonCostCodeList.length) {
         alert('Load comparison data to manage groupings.');
         return;
