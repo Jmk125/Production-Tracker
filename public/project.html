@@ -287,12 +287,42 @@
           <table id="entriesTable" style="width: 100%; border-collapse: collapse;">
             <thead>
               <tr style="border-bottom: 2px solid var(--border-color);">
-                <th style="padding: 0.75rem; text-align: left;"><button class="sort-button" type="button" onclick="changeEntrySort('date')">Date ${renderEntrySortIndicator('date')}</button></th>
-                <th style="padding: 0.75rem; text-align: left;"><button class="sort-button" type="button" onclick="changeEntrySort('employee')">Employee ${renderEntrySortIndicator('employee')}</button></th>
-                <th style="padding: 0.75rem; text-align: left;"><button class="sort-button" type="button" onclick="changeEntrySort('pay_class')">Pay Class ${renderEntrySortIndicator('pay_class')}</button></th>
-                <th style="padding: 0.75rem; text-align: right;"><button class="sort-button" type="button" onclick="changeEntrySort('hours')">Hours ${renderEntrySortIndicator('hours')}</button></th>
-                <th style="padding: 0.75rem; text-align: left;"><button class="sort-button" type="button" onclick="changeEntrySort('cost_code')">Cost Code ${renderEntrySortIndicator('cost_code')}</button></th>
-                <th style="padding: 0.75rem; text-align: left;"><button class="sort-button" type="button" onclick="changeEntrySort('job_description')">Job ${renderEntrySortIndicator('job_description')}</button></th>
+                <th style="padding: 0.75rem; text-align: left;">
+                  <button class="sort-button" type="button" data-sort-col="date" onclick="changeEntrySort('date')">
+                    <span class="sort-label">Date</span>
+                    <span class="sort-indicator" id="sort-indicator-date"></span>
+                  </button>
+                </th>
+                <th style="padding: 0.75rem; text-align: left;">
+                  <button class="sort-button" type="button" data-sort-col="employee" onclick="changeEntrySort('employee')">
+                    <span class="sort-label">Employee</span>
+                    <span class="sort-indicator" id="sort-indicator-employee"></span>
+                  </button>
+                </th>
+                <th style="padding: 0.75rem; text-align: left;">
+                  <button class="sort-button" type="button" data-sort-col="pay_class" onclick="changeEntrySort('pay_class')">
+                    <span class="sort-label">Pay Class</span>
+                    <span class="sort-indicator" id="sort-indicator-pay_class"></span>
+                  </button>
+                </th>
+                <th style="padding: 0.75rem; text-align: right;">
+                  <button class="sort-button" type="button" data-sort-col="hours" onclick="changeEntrySort('hours')">
+                    <span class="sort-label">Hours</span>
+                    <span class="sort-indicator" id="sort-indicator-hours"></span>
+                  </button>
+                </th>
+                <th style="padding: 0.75rem; text-align: left;">
+                  <button class="sort-button" type="button" data-sort-col="cost_code" onclick="changeEntrySort('cost_code')">
+                    <span class="sort-label">Cost Code</span>
+                    <span class="sort-indicator" id="sort-indicator-cost_code"></span>
+                  </button>
+                </th>
+                <th style="padding: 0.75rem; text-align: left;">
+                  <button class="sort-button" type="button" data-sort-col="job_description" onclick="changeEntrySort('job_description')">
+                    <span class="sort-label">Job</span>
+                    <span class="sort-indicator" id="sort-indicator-job_description"></span>
+                  </button>
+                </th>
                 <th style="padding: 0.75rem; text-align: left;">Actions</th>
               </tr>
             </thead>
@@ -838,6 +868,7 @@
       const tfoot = document.getElementById('entriesTableFoot');
 
       renderSuspiciousEntries();
+      updateEntrySortIndicators();
 
       if (timeEntries.length === 0) {
         tbody.innerHTML = `
@@ -991,6 +1022,16 @@
     function renderEntrySortIndicator(column) {
       if (entrySort.column !== column) return '';
       return entrySort.direction === 'asc' ? '▲' : '▼';
+    }
+
+    function updateEntrySortIndicators() {
+      const columns = ['date', 'employee', 'pay_class', 'hours', 'cost_code', 'job_description'];
+      columns.forEach(col => {
+        const indicator = document.querySelector(`#sort-indicator-${col}`);
+        if (indicator) {
+          indicator.textContent = renderEntrySortIndicator(col);
+        }
+      });
     }
 
     function sortEntries(entries = []) {
