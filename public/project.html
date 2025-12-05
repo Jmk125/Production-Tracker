@@ -2592,6 +2592,9 @@
       const ctx = document.getElementById('hoursChart');
       const applyFilters = document.getElementById('applyFiltersToggle')?.checked !== false;
 
+      const tooltipMode = stacked ? 'nearest' : 'index';
+      const tooltipIntersect = stacked;
+
       toggleFilterPanelVisibility(true);
 
       const baseData = filterBySelectedJobs(filterBySelectedCostCodes(detailedStats));
@@ -2643,8 +2646,8 @@
               display: viewType !== 'total'
             },
             tooltip: {
-              mode: 'index',
-              intersect: false,
+              mode: tooltipMode,
+              intersect: tooltipIntersect,
               callbacks: tooltipCallbacks
             }
           },
