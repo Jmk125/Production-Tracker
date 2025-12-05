@@ -580,7 +580,8 @@ app.post('/api/projects/:id/upload', upload.single('payroll'), async (req, res) 
       hours: entry.hours,
       rate: entry.rate,
       cost_code: entry.cost_code,
-      job_description: entry.job_description
+      job_description: entry.job_description,
+      included: entry.included !== false
     }));
     
     // Batch insert all entries at once
@@ -615,20 +616,29 @@ app.post('/api/projects/:id/upload', upload.single('payroll'), async (req, res) 
 app.patch('/api/entries/:id', async (req, res) => {
   try {
     const entryId = parseInt(req.params.id);
-    const { cost_code, job_description } = req.body || {};
+    const { cost_code, job_description, included } = req.body || {};
 
-    if (!cost_code || typeof cost_code !== 'string' || !cost_code.trim()) {
-      return res.status(400).json({ error: 'A cost code is required' });
+    const updates = {};
+
+    if (cost_code !== undefined) {
+      if (typeof cost_code !== 'string' || !cost_code.trim()) {
+        return res.status(400).json({ error: 'A cost code is required' });
+      }
+      updates.cost_code = cost_code.trim();
     }
-
-    const updates = {
-      cost_code: cost_code.trim()
-    };
 
     if (job_description !== undefined) {
       updates.job_description = typeof job_description === 'string'
         ? job_description.trim()
         : job_description;
+    }
+
+    if (included !== undefined) {
+      updates.included = Boolean(included);
+    }
+
+    if (Object.keys(updates).length === 0) {
+      return res.status(400).json({ error: 'No updates provided' });
     }
 
     const updated = await timeEntryQueries.updateEntry(entryId, updates);

@@ -281,6 +281,11 @@
               </button>
               <div id="costCodeFilterMenu" class="multiselect-menu" style="display: none;"></div>
             </div>
+            <select id="includeFilter" onchange="handleIncludeFilterChange(this.value)" style="padding: 0.5rem; border: 1px solid var(--border-color); border-radius: 0.375rem; background: #fff; min-width: 150px;">
+              <option value="all">All entries</option>
+              <option value="included">Included only</option>
+              <option value="excluded">Excluded only</option>
+            </select>
             <button class="chip" type="button" onclick="resetEntryFilters()">Reset</button>
           </div>
         </div>
@@ -327,12 +332,18 @@
                     <span class="sort-indicator" id="sort-indicator-job_description"></span>
                   </button>
                 </th>
+                <th style="padding: 0.75rem; text-align: left;">
+                  <button class="sort-button" type="button" data-sort-col="included" onclick="changeEntrySort('included')">
+                    <span class="sort-label">Included?</span>
+                    <span class="sort-indicator" id="sort-indicator-included"></span>
+                  </button>
+                </th>
                 <th style="padding: 0.75rem; text-align: left;">Actions</th>
               </tr>
             </thead>
             <tbody id="entriesTableBody">
               <tr>
-                <td colspan="7" style="padding: 2rem; text-align: center; color: var(--text-secondary);">
+                <td colspan="8" style="padding: 2rem; text-align: center; color: var(--text-secondary);">
                   Loading entries...
                 </td>
               </tr>
@@ -373,6 +384,7 @@
     let employeeChart = null;
     let entrySort = { column: 'date', direction: 'asc' };
     let entryCostCodeFilters = new Set();
+    let entryIncludeFilter = 'all';
     let editingEntryId = null;
 
     document.addEventListener('DOMContentLoaded', async () => {
@@ -821,11 +833,12 @@
     }
 
     function buildMonthlyEmployeeStats(entries) {
-      if (!entries || !entries.length) return [];
+      const activeEntries = (entries || []).filter(entry => entry.included !== false);
+      if (!activeEntries.length) return [];
 
       const monthlyMap = {};
 
-      entries.forEach(entry => {
+      activeEntries.forEach(entry => {
         const month = entry.date.substring(0, 7);
 
         if (!monthlyMap[month]) {
@@ -878,7 +891,7 @@
       if (timeEntries.length === 0) {
         tbody.innerHTML = `
           <tr>
-            <td colspan="7" style="padding: 2rem; text-align: center; color: var(--text-secondary);">
+            <td colspan="8" style="padding: 2rem; text-align: center; color: var(--text-secondary);">
               No time entries yet. Upload a payroll PDF to get started.
             </td>
           </tr>
@@ -893,6 +906,11 @@
       const activeCostCodeFilters = entryCostCodeFilters.size ? new Set(entryCostCodeFilters) : null;
 
       let filtered = [...timeEntries];
+
+      if (entryIncludeFilter !== 'all') {
+        const shouldInclude = entryIncludeFilter === 'included';
+        filtered = filtered.filter(entry => (entry.included !== false) === shouldInclude);
+      }
 
       if (activeCostCodeFilters && activeCostCodeFilters.size) {
         const includeMissing = activeCostCodeFilters.has('missing');
@@ -923,12 +941,13 @@
 
       filtered = sortEntries(filtered);
 
-      const totalHours = filtered.reduce((sum, entry) => sum + (Number(entry.hours) || 0), 0);
+      const totalHours = filtered.reduce((sum, entry) => sum + (entry.included === false ? 0 : (Number(entry.hours) || 0)), 0);
+      const excludedHours = filtered.reduce((sum, entry) => sum + (entry.included === false ? (Number(entry.hours) || 0) : 0), 0);
 
       if (!filtered.length) {
         tbody.innerHTML = `
           <tr>
-            <td colspan="7" style="padding: 1.5rem; text-align: center; color: var(--text-secondary);">No entries match your current search or filters.</td>
+            <td colspan="8" style="padding: 1.5rem; text-align: center; color: var(--text-secondary);">No entries match your current search or filters.</td>
           </tr>
         `;
 
@@ -955,6 +974,13 @@
               : escapeHtml(entry.job_description || '-')}
             </td>
             <td style="padding: 0.75rem;">
+              <div style="display: flex; align-items: center; gap: 0.5rem; flex-wrap: wrap;">
+                <span style="display: inline-flex; align-items: center; gap: 0.3rem; padding: 0.25rem 0.5rem; border-radius: 999px; font-size: 0.85rem; background: ${entry.included === false ? '#fef2f2' : '#ecfdf3'}; color: ${entry.included === false ? '#991b1b' : '#166534'}; border: 1px solid ${entry.included === false ? '#fecaca' : '#bbf7d0'};">${entry.included === false ? 'Excluded' : 'Included'}</span>
+                <button class="chip" type="button" onclick="toggleEntryIncluded(${entry.id}, ${entry.included !== false})">${entry.included !== false ? 'Exclude' : 'Include'}</button>
+              </div>
+              <div data-include-status="${entry.id}" style="font-size: 0.85rem; color: var(--text-secondary); margin-top: 0.35rem;"></div>
+            </td>
+            <td style="padding: 0.75rem;">
               <div style="display: flex; gap: 0.5rem; align-items: center; flex-wrap: wrap;">
                 ${isEditing
                   ? `<button class="btn btn-primary" type="button" onclick="saveEntryEdit(${entry.id})">Save</button>
@@ -970,8 +996,9 @@
       if (tfoot) {
         tfoot.innerHTML = `
           <tr style="background: #f8fafc; border-top: 2px solid var(--border-color);">
-            <td colspan="7" style="padding: 0.75rem; font-weight: 600;">
-              Visible total hours: ${totalHours.toFixed(2)}
+            <td colspan="8" style="padding: 0.75rem; font-weight: 600; display: flex; justify-content: space-between; gap: 1rem;">
+              <span>Visible included hours: ${totalHours.toFixed(2)}</span>
+              <span style="color: var(--text-secondary);">Excluded hours in view: ${excludedHours.toFixed(2)}</span>
             </td>
           </tr>
         `;
@@ -1044,6 +1071,11 @@
       renderTimeEntries();
     }
 
+    function handleIncludeFilterChange(value) {
+      entryIncludeFilter = value || 'all';
+      renderTimeEntries();
+    }
+
     function updateCostCodeFilterLabel() {
       const label = document.getElementById('costCodeFilterLabel');
       const toggle = document.getElementById('costCodeFilterToggle');
@@ -1075,9 +1107,13 @@
     function resetEntryFilters() {
       const searchInput = document.getElementById('searchEntries');
 
+      const includeSelect = document.getElementById('includeFilter');
+
       if (searchInput) searchInput.value = '';
+      if (includeSelect) includeSelect.value = 'all';
 
       entryCostCodeFilters.clear();
+      entryIncludeFilter = 'all';
       entrySort = { column: 'date', direction: 'asc' };
       renderCostCodeFilterOptions();
       renderTimeEntries();
@@ -1099,7 +1135,7 @@
     }
 
     function updateEntrySortIndicators() {
-      const columns = ['date', 'employee', 'pay_class', 'hours', 'cost_code', 'job_description'];
+      const columns = ['date', 'employee', 'pay_class', 'hours', 'cost_code', 'job_description', 'included'];
       columns.forEach(col => {
         const indicator = document.querySelector(`#sort-indicator-${col}`);
         if (indicator) {
@@ -1124,6 +1160,8 @@
             return entry.cost_code || '';
           case 'job_description':
             return entry.job_description || '';
+          case 'included':
+            return entry.included === false ? 0 : 1;
           default:
             return entry.date ? new Date(entry.date).getTime() : 0;
         }
@@ -1161,11 +1199,12 @@
     }
 
     function renderSummaryStats() {
-      const totalHours = timeEntries.reduce((sum, entry) => sum + entry.hours, 0);
-      const uniqueEmployees = new Set(timeEntries.map(e => e.employee_name)).size;
-      const costCodes = new Set(timeEntries.map(e => e.cost_code).filter(Boolean)).size;
+      const includedEntries = timeEntries.filter(entry => entry.included !== false);
+      const totalHours = includedEntries.reduce((sum, entry) => sum + entry.hours, 0);
+      const uniqueEmployees = new Set(includedEntries.map(e => e.employee_name)).size;
+      const costCodes = new Set(includedEntries.map(e => e.cost_code).filter(Boolean)).size;
 
-      const payClassTotals = timeEntries.reduce((acc, entry) => {
+      const payClassTotals = includedEntries.reduce((acc, entry) => {
         const key = entry.pay_class || 'Unknown';
         acc[key] = (acc[key] || 0) + entry.hours;
         return acc;
@@ -1178,9 +1217,9 @@
         ? payClassEntries.map(([name, hours]) => `${name}: ${Math.round(hours / ratioBase)}`).join(' • ')
         : 'No pay class hours available yet.';
 
-      const dateRange = timeEntries.length > 0 ? {
-        start: new Date(Math.min(...timeEntries.map(e => new Date(e.date)))),
-        end: new Date(Math.max(...timeEntries.map(e => new Date(e.date))))
+      const dateRange = includedEntries.length > 0 ? {
+        start: new Date(Math.min(...includedEntries.map(e => new Date(e.date)))),
+        end: new Date(Math.max(...includedEntries.map(e => new Date(e.date))))
       } : null;
 
       document.getElementById('summaryStats').innerHTML = `
@@ -1322,6 +1361,50 @@
 
       // Flag anything overly short/long or with unexpected punctuation
       return normalized.length < 3 || normalized.length > 6 || /[^\d-]/.test(trimmed);
+    }
+
+    async function toggleEntryIncluded(entryId, currentIncluded) {
+      const statusEl = document.querySelector(`[data-include-status="${entryId}"]`) || document.querySelector(`[data-entry-status="${entryId}"]`);
+
+      if (statusEl) {
+        statusEl.style.color = 'var(--text-secondary)';
+        statusEl.textContent = 'Saving...';
+      }
+
+      try {
+        const response = await fetch(`/api/entries/${entryId}`, {
+          method: 'PATCH',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ included: !currentIncluded })
+        });
+
+        const result = await response.json();
+
+        if (!response.ok) {
+          throw new Error(result.error || 'Unable to update entry');
+        }
+
+        await loadTimeEntries();
+        await loadDetailedStats({ preserveFilters: true });
+        renderSummaryStats();
+        renderBudgetSummary();
+        renderBudgetBreakdown();
+        renderBudgetCharts();
+        renderAreaVarianceSummary();
+
+        if (statusEl) {
+          statusEl.style.color = '#166534';
+          statusEl.textContent = result.entry?.included === false
+            ? 'Entry excluded from totals.'
+            : 'Entry included in totals.';
+        }
+      } catch (error) {
+        console.error('Error updating entry inclusion:', error);
+        if (statusEl) {
+          statusEl.style.color = '#991b1b';
+          statusEl.textContent = `Error: ${error.message}`;
+        }
+      }
     }
 
     async function persistEntryUpdate(entryId, codeValue, jobValue, statusEl) {

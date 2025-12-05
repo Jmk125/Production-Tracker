@@ -60,19 +60,22 @@ async function parsePayrollPDF(filePath) {
     // Cost code pattern updated to handle variable lengths: 1-2 digits, hyphen, 2-5 digits (e.g., "1-400", "09-170", "01-4000")
     // Certified class suffix can sometimes be a letter (e.g., "CA01AO") instead of a digit
     // Amount column can vary, so accept any numeric group instead of the previous fixed 75xx pattern
-    const entryMatch = line.match(/^\s+([A-Z]\d?)\s+(\d{3})\s+([A-Z]{2}\d{2}[A-Z][A-Z0-9])\s+\S+\s+([\d.,]+)\s+([\d.,]+)\s+[\d.,]+\s+(.+?)\s+([\d]{1,2}-[\d]{2,5})/);
+    const entryMatch = line.match(/^\s+([A-Z]\d?)\s+(\d{3})\s+([A-Z]{2}\d{2}[A-Z][A-Z0-9])\s+\S+\s+(-?[\d.,]+-?)\s+([\d.,]+)\s+[\d.,]+\s+(.+?)\s+([\d]{1,2}-[\d]{2,5})/);
 
     // Fallback: same structure but missing/invalid cost code at the end
-    const entryNoCodeMatch = !entryMatch && line.match(/^\s+([A-Z]\d?)\s+(\d{3})\s+([A-Z]{2}\d{2}[A-Z][A-Z0-9])\s+\S+\s+([\d.,]+)\s+([\d.,]+)\s+[\d.,]+\s+(.+)/);
+    const entryNoCodeMatch = !entryMatch && line.match(/^\s+([A-Z]\d?)\s+(\d{3})\s+([A-Z]{2}\d{2}[A-Z][A-Z0-9])\s+\S+\s+(-?[\d.,]+-?)\s+([\d.,]+)\s+[\d.,]+\s+(.+)/);
 
     if ((entryMatch || entryNoCodeMatch) && currentEmployee && currentDate) {
       const parts = entryMatch || entryNoCodeMatch;
       const payClass = parts[1];
       const payId = parts[2];
       const certifiedClass = parts[3];
-      const hoursRaw = parts[4];
-      const hoursIsNegative = /-\s*$/.test(hoursRaw);
-      const hours = hoursIsNegative ? 0 : parseNumber(hoursRaw);
+      const hoursRaw = (parts[4] || '').trim();
+      const hasLeadingMinus = /^-/.test(hoursRaw);
+      const hasTrailingMinus = /-\s*$/.test(hoursRaw);
+      const numericHours = parseFloat(hoursRaw.replace(/[^\d.]/g, '')) || 0;
+      const hours = hasLeadingMinus ? -numericHours : numericHours;
+      const included = !hasTrailingMinus;
       const rate = parseNumber(parts[5]);
       const jobDescription = (parts[6] || '').trim();
       const costCode = entryMatch ? parts[7] : null;
@@ -92,7 +95,8 @@ async function parsePayrollPDF(filePath) {
         hours: hours,
         rate: rate,
         cost_code: costCode,
-        job_description: jobDescription
+        job_description: jobDescription,
+        included
       });
     } else {
       const looksLikeEntry = /[A-Z]\d?\s+\d{3}\s+[A-Z]{2}\d{2}[A-Z][A-Z0-9]/.test(line);
@@ -103,7 +107,9 @@ async function parsePayrollPDF(filePath) {
     }
   }
 
-  const parsedHours = entries.reduce((sum, entry) => sum + (Number(entry.hours) || 0), 0);
+  const parsedHours = entries
+    .filter(entry => entry.included !== false)
+    .reduce((sum, entry) => sum + (Number(entry.hours) || 0), 0);
   const detectedTotalHours = detectedTotals.length ? Math.max(...detectedTotals) : null;
 
   return {
