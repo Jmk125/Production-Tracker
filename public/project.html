@@ -272,11 +272,15 @@
       <div class="card">
         <div class="card-header">
           <h3 class="card-title">Time Entries</h3>
-          <div style="display: flex; gap: 0.5rem;">
+          <div style="display: flex; gap: 0.5rem; align-items: center;">
             <input type="text" id="searchEntries" placeholder="Search..." style="padding: 0.5rem; border: 1px solid var(--border-color); border-radius: 0.375rem;">
-            <select id="costCodeFilter" style="padding: 0.5rem; border: 1px solid var(--border-color); border-radius: 0.375rem; min-width: 180px;">
-              <option value="all">All cost codes</option>
-            </select>
+            <div id="costCodeFilterContainer" class="multiselect">
+              <button id="costCodeFilterToggle" class="chip multiselect-toggle" type="button" onclick="toggleCostCodeFilterMenu()" aria-haspopup="true" aria-expanded="false">
+                <span id="costCodeFilterLabel">All cost codes</span>
+                <span class="chevron">▾</span>
+              </button>
+              <div id="costCodeFilterMenu" class="multiselect-menu" style="display: none;"></div>
+            </div>
             <button class="chip" type="button" onclick="resetEntryFilters()">Reset</button>
           </div>
         </div>
@@ -368,7 +372,7 @@
     let areaVarianceChart = null;
     let employeeChart = null;
     let entrySort = { column: 'date', direction: 'asc' };
-    let entryCostCodeFilter = 'all';
+    let entryCostCodeFilters = new Set();
     let editingEntryId = null;
 
     document.addEventListener('DOMContentLoaded', async () => {
@@ -390,13 +394,14 @@
         searchInput.addEventListener('input', renderTimeEntries);
       }
 
-      const costFilter = document.getElementById('costCodeFilter');
-      if (costFilter) {
-        costFilter.addEventListener('change', (event) => {
-          entryCostCodeFilter = event.target.value;
-          renderTimeEntries();
-        });
-      }
+      document.addEventListener('click', (event) => {
+        const container = document.getElementById('costCodeFilterContainer');
+        if (!container) return;
+
+        if (!container.contains(event.target)) {
+          toggleCostCodeFilterMenu(false);
+        }
+      });
     });
 
     async function loadProject() {
@@ -885,14 +890,21 @@
       }
 
       const searchTerm = document.getElementById('searchEntries')?.value?.toLowerCase() || '';
-      const activeFilter = entryCostCodeFilter || 'all';
+      const activeCostCodeFilters = entryCostCodeFilters.size ? new Set(entryCostCodeFilters) : null;
 
       let filtered = [...timeEntries];
 
-      if (activeFilter === 'missing') {
-        filtered = filtered.filter(entry => !entry.cost_code);
-      } else if (activeFilter !== 'all') {
-        filtered = filtered.filter(entry => normalizeCostCodeLabel(entry.cost_code) === activeFilter);
+      if (activeCostCodeFilters && activeCostCodeFilters.size) {
+        const includeMissing = activeCostCodeFilters.has('missing');
+        const allowedCodes = new Set([...activeCostCodeFilters].filter(code => code !== 'missing'));
+
+        filtered = filtered.filter(entry => {
+          const normalized = normalizeCostCodeLabel(entry.cost_code);
+          const isMissing = !entry.cost_code;
+          const matchesMissing = includeMissing && isMissing;
+          const matchesCode = allowedCodes.size > 0 && allowedCodes.has(normalized);
+          return matchesMissing || matchesCode;
+        });
       }
 
       if (searchTerm) {
@@ -967,45 +979,107 @@
     }
 
     function renderCostCodeFilterOptions() {
-      const select = document.getElementById('costCodeFilter');
-      if (!select) return;
+      const menu = document.getElementById('costCodeFilterMenu');
+      if (!menu) return;
 
-      const previousSelection = entryCostCodeFilter || select.value || 'all';
-      const codes = new Set();
+      const options = new Set();
 
       timeEntries.forEach(entry => {
         const normalized = normalizeCostCodeLabel(entry.cost_code);
         if (normalized && normalized !== 'Unknown') {
-          codes.add(normalized);
+          options.add(normalized);
         }
         if (!entry.cost_code) {
-          codes.add('missing');
+          options.add('missing');
         }
       });
 
-      const sortedCodes = Array.from(codes).filter(code => code !== 'missing').sort();
+      const sortedCodes = Array.from(options).filter(code => code !== 'missing').sort();
+      const allowedSelections = new Set(sortedCodes);
+      if (options.has('missing')) allowedSelections.add('missing');
 
-      select.innerHTML = [
-        '<option value="all">All cost codes</option>',
-        '<option value="missing">Missing code</option>',
-        ...sortedCodes.map(code => `<option value="${escapeHtml(code)}">${escapeHtml(code)}</option>`)
-      ].join('');
+      entryCostCodeFilters = new Set([...entryCostCodeFilters].filter(code => allowedSelections.has(code)));
 
-      const allowedValues = new Set(['all', 'missing', ...sortedCodes]);
-      const targetValue = allowedValues.has(previousSelection) ? previousSelection : 'all';
-      select.value = targetValue;
-      entryCostCodeFilter = targetValue;
+      menu.innerHTML = '';
+      const wrapper = document.createElement('div');
+      wrapper.className = 'multiselect-options';
+
+      const addCheckbox = (value, label, checked) => {
+        const option = document.createElement('label');
+        option.className = 'checkbox';
+
+        const input = document.createElement('input');
+        input.type = 'checkbox';
+        input.value = value;
+        input.checked = checked;
+        input.addEventListener('change', (event) => handleCostCodeFilterSelection(value, event.target.checked));
+
+        option.appendChild(input);
+        option.appendChild(document.createTextNode(` ${label}`));
+
+        wrapper.appendChild(option);
+      };
+
+      addCheckbox('all', 'All cost codes', entryCostCodeFilters.size === 0);
+      if (options.has('missing')) {
+        addCheckbox('missing', 'Missing code', entryCostCodeFilters.has('missing'));
+      }
+
+      sortedCodes.forEach(code => addCheckbox(code, code, entryCostCodeFilters.has(code)));
+
+      menu.appendChild(wrapper);
+      updateCostCodeFilterLabel();
+    }
+
+    function handleCostCodeFilterSelection(value, isChecked) {
+      if (value === 'all') {
+        entryCostCodeFilters.clear();
+      } else if (isChecked) {
+        entryCostCodeFilters.add(value);
+      } else {
+        entryCostCodeFilters.delete(value);
+      }
+
+      renderCostCodeFilterOptions();
+      renderTimeEntries();
+    }
+
+    function updateCostCodeFilterLabel() {
+      const label = document.getElementById('costCodeFilterLabel');
+      const toggle = document.getElementById('costCodeFilterToggle');
+      if (!label) return;
+
+      if (entryCostCodeFilters.size === 0) {
+        label.textContent = 'All cost codes';
+        if (toggle) toggle.title = 'Filtering all cost codes';
+        return;
+      }
+
+      const readable = [...entryCostCodeFilters].map(code => code === 'missing' ? 'Missing code' : code);
+      const summary = readable.length <= 3 ? readable.join(', ') : `${readable.length} codes selected`;
+
+      label.textContent = summary;
+      if (toggle) toggle.title = `Filtering ${summary}`;
+    }
+
+    function toggleCostCodeFilterMenu(forceState) {
+      const menu = document.getElementById('costCodeFilterMenu');
+      const toggle = document.getElementById('costCodeFilterToggle');
+      if (!menu || !toggle) return;
+
+      const shouldShow = typeof forceState === 'boolean' ? forceState : menu.style.display !== 'block';
+      menu.style.display = shouldShow ? 'block' : 'none';
+      toggle.setAttribute('aria-expanded', shouldShow ? 'true' : 'false');
     }
 
     function resetEntryFilters() {
       const searchInput = document.getElementById('searchEntries');
-      const costFilter = document.getElementById('costCodeFilter');
 
       if (searchInput) searchInput.value = '';
-      if (costFilter) costFilter.value = 'all';
 
-      entryCostCodeFilter = 'all';
+      entryCostCodeFilters.clear();
       entrySort = { column: 'date', direction: 'asc' };
+      renderCostCodeFilterOptions();
       renderTimeEntries();
     }
 
