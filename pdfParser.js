@@ -109,6 +109,12 @@ function parseNumber(value) {
   return parseFloat(clean) || 0;
 }
 
+function parseNumber(value) {
+  if (value === undefined || value === null) return 0;
+  const clean = value.toString().replace(/[^\d.]/g, '');
+  return parseFloat(clean) || 0;
+}
+
 /**
  * Convert MM/DD/YY to YYYY-MM-DD
  */
