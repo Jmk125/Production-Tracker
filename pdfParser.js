@@ -76,19 +76,14 @@ async function parsePayrollPDF(filePath) {
       const certifiedClass = parts[3];
       const payId = parts[4];
       const hoursRaw = (parts[5] || '').trim();
-      const hasLeadingMinus = /^-/.test(hoursRaw);
+      const hoursIsNegative = /^-/.test(hoursRaw);
       const hasTrailingMinus = /-\s*$/.test(hoursRaw);
       const numericHours = parseFloat(hoursRaw.replace(/[^\d.]/g, '')) || 0;
-      const hours = hasLeadingMinus ? -numericHours : numericHours;
+      const hours = hoursIsNegative ? -numericHours : numericHours;
       const included = !hasTrailingMinus;
       const rate = parseNumber(parts[6]);
       const jobDescription = (parts[7] || '').trim();
       const costCode = entryMatch ? parts[8] : null;
-
-      if (hoursIsNegative) {
-        ignoredLines.push(`${line.trim()} (ignored negative hours)`);
-        continue;
-      }
 
       entries.push({
         employee_name: currentEmployee,
