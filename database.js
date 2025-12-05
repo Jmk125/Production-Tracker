@@ -131,6 +131,29 @@ const projectQueries = {
     }
   },
 
+  updateDatesIfMissing: async (id, { start_date, end_date } = {}) => {
+    const projects = readJSON(PROJECTS_FILE);
+    const index = projects.findIndex(p => p.id === parseInt(id));
+    if (index === -1) return null;
+
+    let changed = false;
+    if ((!projects[index].start_date || projects[index].start_date === '') && start_date) {
+      projects[index].start_date = start_date;
+      changed = true;
+    }
+
+    if ((!projects[index].end_date || projects[index].end_date === '') && end_date) {
+      projects[index].end_date = end_date;
+      changed = true;
+    }
+
+    if (changed) {
+      writeJSON(PROJECTS_FILE, projects);
+    }
+
+    return projects[index];
+  },
+
   delete: async (id) => {
     const projects = readJSON(PROJECTS_FILE);
     const filtered = projects.filter(p => p.id !== parseInt(id));
@@ -613,6 +636,8 @@ const comparisonQueries = {
       entries: Object.values(aggregated).sort((a, b) => a.project_month - b.project_month),
       rawEntries: includedEntries,
       projectStartDate,
+      projectSize: project?.size ?? null,
+      projectSizeUnit: project?.size_unit ?? null,
       employeeStats: {
         projectTimeline: buildEmployeeStats(projectMonthStats),
         calendarTimeline: buildEmployeeStats(calendarMonthStats)

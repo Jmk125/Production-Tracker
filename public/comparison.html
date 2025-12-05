@@ -1169,6 +1169,10 @@
         const spentHours = hasBudget ? budgetRows.reduce((sum, row) => sum + (Number(row.actual_hours) || 0), 0) : null;
         const varianceHours = budgetedHours !== null && spentHours !== null ? spentHours - budgetedHours : null;
         const variancePercent = budgetedHours > 0 && spentHours !== null ? ((varianceHours || 0) / budgetedHours) * 100 : null;
+        const projectSize = project.projectSize || (allProjects.find(p => Number(p.id) === Number(project.projectId))?.size) || null;
+        const projectSizeUnit = project.projectSizeUnit || (allProjects.find(p => Number(p.id) === Number(project.projectId))?.size_unit) || null;
+        const supportsAreaMetric = projectSize && (projectSizeUnit || '').toLowerCase() === 'sf';
+        const hoursPerSF = supportsAreaMetric ? totalHours / projectSize : null;
 
         return {
           name: project.data[0]?.project_name || `Project ${project.projectId}`,
@@ -1177,6 +1181,7 @@
           costCodes,
           projectMonths,
           avgHoursPerMonth,
+          hoursPerSF,
           budgetedHours,
           spentHours,
           varianceHours,
@@ -1207,6 +1212,10 @@
         acc.costCodes += metric.costCodes || 0;
         acc.projectMonths += metric.projectMonths || 0;
         acc.avgHoursPerMonth += metric.avgHoursPerMonth || 0;
+        if (metric.hoursPerSF !== null && metric.hoursPerSF !== undefined) {
+          acc.hoursPerSF.total += metric.hoursPerSF;
+          acc.hoursPerSF.count += 1;
+        }
 
         if (metric.budgetedHours !== null && metric.budgetedHours !== undefined) {
           acc.budgetedHours.total += metric.budgetedHours;
@@ -1235,6 +1244,7 @@
         costCodes: 0,
         projectMonths: 0,
         avgHoursPerMonth: 0,
+        hoursPerSF: { total: 0, count: 0 },
         budgetedHours: { total: 0, count: 0 },
         spentHours: { total: 0, count: 0 },
         varianceHours: { total: 0, count: 0 },
@@ -1250,6 +1260,7 @@
         costCodes: Math.round(totals.costCodes / count),
         projectMonths: Math.round(totals.projectMonths / count),
         avgHoursPerMonth: totals.avgHoursPerMonth / count,
+        hoursPerSF: totals.hoursPerSF.count ? totals.hoursPerSF.total / totals.hoursPerSF.count : null,
         budgetedHours: totals.budgetedHours.count ? totals.budgetedHours.total / totals.budgetedHours.count : null,
         spentHours: totals.spentHours.count ? totals.spentHours.total / totals.spentHours.count : null,
         varianceHours: totals.varianceHours.count ? totals.varianceHours.total / totals.varianceHours.count : null,
@@ -1268,7 +1279,7 @@
         : '—';
 
       const backgroundStyle = isAggregate
-        ? 'background: linear-gradient(135deg, rgba(37,99,235,0.08), rgba(255,255,255,0.9));'
+        ? 'background: linear-gradient(135deg, rgba(37,99,235,0.18), rgba(16,24,40,0.06));'
         : 'background-color: var(--background);';
 
       return `
@@ -1287,6 +1298,14 @@
               </div>
               <div style="color: var(--text-secondary); font-size: 0.813rem;">Avg Hours/Month</div>
             </div>
+            ${metric.hoursPerSF !== null && metric.hoursPerSF !== undefined ? `
+              <div>
+                <div style="font-size: 1.25rem; font-weight: 600;">
+                  ${Number(metric.hoursPerSF).toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
+                </div>
+                <div style="color: var(--text-secondary); font-size: 0.813rem;">Hours/SF</div>
+              </div>
+            ` : ''}
             <div style="display: flex; justify-content: space-between; padding-top: 0.75rem; border-top: 1px solid var(--border-color);">
               <div>
                 <div style="font-weight: 600;">${Number(metric.uniqueEmployees || 0).toLocaleString()}</div>
@@ -1404,7 +1423,7 @@
     function formatDate(dateStr) {
       if (!dateStr) return '';
       const date = new Date(dateStr + 'T00:00:00');
-      return date.toLocaleDateString('en-US', { month: 'short', day: 'numeric', year: 'numeric' });
+      return date.toLocaleDateString('en-US', { month: 'short', year: 'numeric' });
     }
 
     function formatMonth(monthStr) {

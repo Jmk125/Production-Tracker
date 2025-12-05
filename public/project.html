@@ -424,7 +424,7 @@
         document.getElementById('projectName').textContent = projectData.name;
         
         const meta = [];
-        if (projectData.size) meta.push(`📏 ${projectData.size} ${projectData.size_unit || ''}`);
+        if (projectData.size) meta.push(`📏 ${formatNumber(projectData.size)} ${projectData.size_unit || ''}`);
         if (projectData.start_date) meta.push(`📅 ${formatDate(projectData.start_date)}`);
         if (projectData.end_date) meta.push(`🏁 ${formatDate(projectData.end_date)}`);
         
@@ -1205,6 +1205,8 @@
       const totalHours = includedEntries.reduce((sum, entry) => sum + entry.hours, 0);
       const uniqueEmployees = new Set(includedEntries.map(e => e.employee_name)).size;
       const costCodes = new Set(includedEntries.map(e => e.cost_code).filter(Boolean)).size;
+      const supportsAreaMetric = projectData?.size && (projectData?.size_unit || '').toLowerCase() === 'sf';
+      const hoursPerSF = supportsAreaMetric ? totalHours / projectData.size : null;
 
       const payClassTotals = includedEntries.reduce((acc, entry) => {
         const key = entry.pay_class || 'Unknown';
@@ -1233,6 +1235,14 @@
               </div>
               <div style="color: var(--text-secondary); font-size: 0.875rem;">Total Hours</div>
             </div>
+            ${hoursPerSF !== null ? `
+              <div>
+                <div style="font-size: 1.875rem; font-weight: 700; color: var(--primary-color);">
+                  ${hoursPerSF.toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
+                </div>
+                <div style="color: var(--text-secondary); font-size: 0.875rem;">Hours/SF</div>
+              </div>
+            ` : ''}
             <div>
               <div style="font-size: 1.875rem; font-weight: 700; color: var(--primary-color);">
                 ${uniqueEmployees}
@@ -3269,7 +3279,13 @@
     function formatDate(dateStr) {
       if (!dateStr) return '';
       const date = new Date(dateStr + 'T00:00:00');
-      return date.toLocaleDateString('en-US', { month: 'short', day: 'numeric', year: 'numeric' });
+      return date.toLocaleDateString('en-US', { month: 'short', year: 'numeric' });
+    }
+
+    function formatNumber(value) {
+      const num = Number(value);
+      if (Number.isNaN(num)) return value;
+      return num.toLocaleString();
     }
 
     function formatMonth(monthStr) {
