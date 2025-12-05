@@ -38,6 +38,10 @@ function normalizeJobLabel(value) {
   return value.toString().trim().toLowerCase();
 }
 
+function filterIncluded(entries = []) {
+  return entries.filter(entry => entry.included !== false);
+}
+
 // Initialize data directory and files
 function initDatabase() {
   if (!fs.existsSync(DATA_DIR)) {
@@ -145,17 +149,40 @@ const projectQueries = {
 
 // Upload queries
 const uploadQueries = {
-  create: async (project_id, filename) => {
+  create: async (project_id, filename, metrics = {}) => {
     const uploads = readJSON(UPLOADS_FILE);
     const newUpload = {
       id: uploads.length > 0 ? Math.max(...uploads.map(u => u.id)) + 1 : 1,
       project_id: parseInt(project_id),
       filename,
-      upload_date: new Date().toISOString()
+      upload_date: new Date().toISOString(),
+      parsed_hours: metrics.parsed_hours ?? null,
+      detected_total_hours: metrics.detected_total_hours ?? null,
+      variance_hours: metrics.variance_hours ?? null,
+      entries_found: metrics.entries_found ?? null,
+      entries_inserted: metrics.entries_inserted ?? null
     };
     uploads.push(newUpload);
     writeJSON(UPLOADS_FILE, uploads);
     return { lastID: newUpload.id };
+  },
+
+  updateMetrics: async (id, metrics = {}) => {
+    const uploads = readJSON(UPLOADS_FILE);
+    const index = uploads.findIndex(u => u.id === parseInt(id));
+    if (index === -1) return null;
+
+    uploads[index] = {
+      ...uploads[index],
+      parsed_hours: metrics.parsed_hours ?? uploads[index].parsed_hours ?? null,
+      detected_total_hours: metrics.detected_total_hours ?? uploads[index].detected_total_hours ?? null,
+      variance_hours: metrics.variance_hours ?? uploads[index].variance_hours ?? null,
+      entries_found: metrics.entries_found ?? uploads[index].entries_found ?? null,
+      entries_inserted: metrics.entries_inserted ?? uploads[index].entries_inserted ?? null
+    };
+
+    writeJSON(UPLOADS_FILE, uploads);
+    return uploads[index];
   },
 
   getByProject: async (project_id) => {
@@ -201,7 +228,7 @@ const budgetQueries = {
 
 // Time entry queries
 const timeEntryQueries = {
-  create: async (project_id, upload_id, employee_name, pay_id, pay_class, union_local, certified_class, date, hours, rate, cost_code, job_description) => {
+  create: async (project_id, upload_id, employee_name, pay_id, pay_class, union_local, certified_class, date, hours, rate, cost_code, job_description, included = true) => {
     const entries = readJSON(ENTRIES_FILE);
     const newEntry = {
       id: entries.length > 0 ? Math.max(...entries.map(e => e.id)) + 1 : 1,
@@ -216,7 +243,8 @@ const timeEntryQueries = {
       hours,
       rate,
       cost_code,
-      job_description
+      job_description,
+      included: included !== false
     };
     entries.push(newEntry);
     writeJSON(ENTRIES_FILE, entries);
@@ -239,7 +267,8 @@ const timeEntryQueries = {
       hours: data.hours,
       rate: data.rate,
       cost_code: data.cost_code,
-      job_description: data.job_description
+      job_description: data.job_description,
+      included: data.included !== false
     }));
     
     entries.push(...newEntries);
@@ -255,15 +284,20 @@ const timeEntryQueries = {
         const dateCompare = new Date(a.date) - new Date(b.date);
         if (dateCompare !== 0) return dateCompare;
         return a.employee_name.localeCompare(b.employee_name);
-      });
+      })
+      .map(entry => ({
+        ...entry,
+        included: entry.included !== false
+      }));
   },
 
   getMonthlyStats: async (project_id) => {
     const entries = readJSON(ENTRIES_FILE);
     const projectEntries = entries.filter(e => e.project_id === parseInt(project_id));
+    const includedEntries = filterIncluded(projectEntries);
 
     const monthlyData = {};
-    projectEntries.forEach(entry => {
+    includedEntries.forEach(entry => {
       const month = entry.date.substring(0, 7); // YYYY-MM
       if (!monthlyData[month]) {
         monthlyData[month] = {
@@ -301,11 +335,12 @@ const timeEntryQueries = {
   getMonthlyByCategory: async (project_id) => {
     const entries = readJSON(ENTRIES_FILE);
     const projectEntries = entries.filter(e => e.project_id === parseInt(project_id));
+    const includedEntries = filterIncluded(projectEntries);
 
     const result = [];
     const aggregated = {};
 
-    projectEntries.forEach(entry => {
+    includedEntries.forEach(entry => {
       const month = entry.date.substring(0, 7);
       const key = `${month}|${entry.cost_code}|${entry.pay_class}|${entry.job_description}|${entry.employee_name}`;
 
@@ -327,7 +362,7 @@ const timeEntryQueries = {
 
   getCostCodeTotals: async (project_id) => {
     const entries = readJSON(ENTRIES_FILE);
-    const projectEntries = entries.filter(e => e.project_id === parseInt(project_id));
+    const projectEntries = filterIncluded(entries.filter(e => e.project_id === parseInt(project_id)));
 
     const totals = {};
     projectEntries.forEach(entry => {
@@ -342,7 +377,7 @@ const timeEntryQueries = {
 
   getJobTotals: async (project_id) => {
     const entries = readJSON(ENTRIES_FILE);
-    const projectEntries = entries.filter(e => e.project_id === parseInt(project_id));
+    const projectEntries = filterIncluded(entries.filter(e => e.project_id === parseInt(project_id)));
 
     const totals = {};
     const labels = {};
@@ -362,7 +397,7 @@ const timeEntryQueries = {
 
   getJobCostCodeTotals: async (project_id) => {
     const entries = readJSON(ENTRIES_FILE);
-    const projectEntries = entries.filter(e => e.project_id === parseInt(project_id));
+    const projectEntries = filterIncluded(entries.filter(e => e.project_id === parseInt(project_id)));
 
     const result = {};
 
@@ -400,11 +435,15 @@ const timeEntryQueries = {
       throw new Error('Entry not found');
     }
 
-    const allowedFields = ['cost_code', 'job_description'];
+    const allowedFields = ['cost_code', 'job_description', 'included'];
     allowedFields.forEach(field => {
       if (updates[field] !== undefined) {
         const value = updates[field];
-        entries[index][field] = value === null ? null : value;
+        if (field === 'included') {
+          entries[index][field] = Boolean(value);
+        } else {
+          entries[index][field] = value === null ? null : value;
+        }
       }
     });
 
@@ -478,9 +517,10 @@ const comparisonQueries = {
     const projects = readJSON(PROJECTS_FILE);
 
     const projectEntries = entries.filter(e => e.project_id === parseInt(project_id));
+    const includedEntries = filterIncluded(projectEntries);
     const project = projects.find(p => p.id === parseInt(project_id));
 
-    if (projectEntries.length === 0) {
+    if (includedEntries.length === 0) {
       return {
         entries: [],
         employeeStats: {
@@ -491,7 +531,7 @@ const comparisonQueries = {
     }
 
     // Find the first date for this project
-    const dates = projectEntries.map(e => new Date(e.date));
+    const dates = includedEntries.map(e => new Date(e.date));
     const firstDate = new Date(Math.min(...dates));
     const projectStartDate = firstDate.toISOString().substring(0, 10);
 
@@ -499,7 +539,7 @@ const comparisonQueries = {
     const projectMonthStats = {};
     const calendarMonthStats = {};
 
-    projectEntries.forEach(entry => {
+    includedEntries.forEach(entry => {
       const entryDate = new Date(entry.date);
       const hours = Number(entry.hours) || 0;
       const monthsDiff = Math.floor((entryDate - firstDate) / (30.44 * 24 * 60 * 60 * 1000)) + 1;
@@ -556,7 +596,7 @@ const comparisonQueries = {
 
     return {
       entries: Object.values(aggregated).sort((a, b) => a.project_month - b.project_month),
-      rawEntries: projectEntries,
+      rawEntries: includedEntries,
       projectStartDate,
       employeeStats: {
         projectTimeline: buildEmployeeStats(projectMonthStats),
