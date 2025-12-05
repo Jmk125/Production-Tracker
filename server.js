@@ -552,7 +552,7 @@ app.post('/api/projects/:id/upload', upload.single('payroll'), async (req, res) 
     
     // Parse PDF
     console.log('Parsing PDF:', file.path);
-    const entries = await parsePayrollPDF(file.path);
+    const { entries = [], summary = {} } = await parsePayrollPDF(file.path);
     console.log(`Extracted ${entries.length} time entries`);
     
     // Prepare entries for batch insert
@@ -576,15 +576,46 @@ app.post('/api/projects/:id/upload', upload.single('payroll'), async (req, res) 
     const inserted = await timeEntryQueries.createBatch(entryDataArray);
     console.log(`Successfully inserted ${inserted} entries`);
     
-    res.json({ 
-      success: true, 
+    res.json({
+      success: true,
       uploadId,
       entriesFound: entries.length,
-      entriesInserted: inserted
+      entriesInserted: inserted,
+      parsedHours: summary.parsedHours ?? null,
+      detectedTotalHours: summary.detectedTotalHours ?? null,
+      ignoredLines: summary.ignoredLines?.slice(0, 15) || []
     });
   } catch (error) {
     console.error('Error uploading payroll:', error);
     res.status(500).json({ error: 'Failed to process payroll file' });
+  }
+});
+
+// Update a single time entry (e.g., fix missing/invalid cost codes)
+app.patch('/api/entries/:id', async (req, res) => {
+  try {
+    const entryId = parseInt(req.params.id);
+    const { cost_code, job_description } = req.body || {};
+
+    if (!cost_code || typeof cost_code !== 'string' || !cost_code.trim()) {
+      return res.status(400).json({ error: 'A cost code is required' });
+    }
+
+    const updates = {
+      cost_code: cost_code.trim()
+    };
+
+    if (job_description !== undefined) {
+      updates.job_description = typeof job_description === 'string'
+        ? job_description.trim()
+        : job_description;
+    }
+
+    const updated = await timeEntryQueries.updateEntry(entryId, updates);
+    res.json({ success: true, entry: updated });
+  } catch (error) {
+    console.error('Error updating time entry:', error);
+    res.status(500).json({ error: 'Failed to update time entry' });
   }
 });
 

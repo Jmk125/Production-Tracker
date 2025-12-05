@@ -390,6 +390,26 @@ const timeEntryQueries = {
     });
 
     return result;
+  },
+
+  updateEntry: async (id, updates = {}) => {
+    const entries = readJSON(ENTRIES_FILE);
+    const index = entries.findIndex(e => e.id === parseInt(id));
+
+    if (index === -1) {
+      throw new Error('Entry not found');
+    }
+
+    const allowedFields = ['cost_code', 'job_description'];
+    allowedFields.forEach(field => {
+      if (updates[field] !== undefined) {
+        const value = updates[field];
+        entries[index][field] = value === null ? null : value;
+      }
+    });
+
+    writeJSON(ENTRIES_FILE, entries);
+    return entries[index];
   }
 };
 
