@@ -144,6 +144,21 @@ const projectQueries = {
     const entries = readJSON(ENTRIES_FILE);
     const filteredEntries = entries.filter(e => e.project_id !== parseInt(id));
     writeJSON(ENTRIES_FILE, filteredEntries);
+
+    // Delete related budgets
+    const budgets = readJSON(BUDGETS_FILE);
+    const filteredBudgets = budgets.filter(b => b.project_id !== parseInt(id));
+    writeJSON(BUDGETS_FILE, filteredBudgets);
+
+    // Delete area mappings/adjustments
+    const areas = readJSON(AREAS_FILE);
+    const filteredAreas = areas.filter(a => a.project_id !== parseInt(id));
+    writeJSON(AREAS_FILE, filteredAreas);
+
+    // Delete saved cost code mappings
+    const codeMappings = readJSON(CODE_MAPPINGS_FILE);
+    const filteredMappings = codeMappings.filter(m => m.project_id !== parseInt(id));
+    writeJSON(CODE_MAPPINGS_FILE, filteredMappings);
   }
 };
 
