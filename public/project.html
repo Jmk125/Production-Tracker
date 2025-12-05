@@ -274,6 +274,10 @@
           <h3 class="card-title">Time Entries</h3>
           <div style="display: flex; gap: 0.5rem;">
             <input type="text" id="searchEntries" placeholder="Search..." style="padding: 0.5rem; border: 1px solid var(--border-color); border-radius: 0.375rem;">
+            <select id="costCodeFilter" style="padding: 0.5rem; border: 1px solid var(--border-color); border-radius: 0.375rem; min-width: 180px;">
+              <option value="all">All cost codes</option>
+            </select>
+            <button class="chip" type="button" onclick="resetEntryFilters()">Reset</button>
           </div>
         </div>
         <div id="suspiciousEntriesPanel" class="alert alert-warning" style="display: none; margin: 0 1.5rem 1rem 1.5rem;">
@@ -283,21 +287,23 @@
           <table id="entriesTable" style="width: 100%; border-collapse: collapse;">
             <thead>
               <tr style="border-bottom: 2px solid var(--border-color);">
-                <th style="padding: 0.75rem; text-align: left;">Date</th>
-                <th style="padding: 0.75rem; text-align: left;">Employee</th>
-                <th style="padding: 0.75rem; text-align: left;">Pay Class</th>
-                <th style="padding: 0.75rem; text-align: right;">Hours</th>
-                <th style="padding: 0.75rem; text-align: left;">Cost Code</th>
-                <th style="padding: 0.75rem; text-align: left;">Job</th>
+                <th style="padding: 0.75rem; text-align: left;"><button class="sort-button" type="button" onclick="changeEntrySort('date')">Date ${renderEntrySortIndicator('date')}</button></th>
+                <th style="padding: 0.75rem; text-align: left;"><button class="sort-button" type="button" onclick="changeEntrySort('employee')">Employee ${renderEntrySortIndicator('employee')}</button></th>
+                <th style="padding: 0.75rem; text-align: left;"><button class="sort-button" type="button" onclick="changeEntrySort('pay_class')">Pay Class ${renderEntrySortIndicator('pay_class')}</button></th>
+                <th style="padding: 0.75rem; text-align: right;"><button class="sort-button" type="button" onclick="changeEntrySort('hours')">Hours ${renderEntrySortIndicator('hours')}</button></th>
+                <th style="padding: 0.75rem; text-align: left;"><button class="sort-button" type="button" onclick="changeEntrySort('cost_code')">Cost Code ${renderEntrySortIndicator('cost_code')}</button></th>
+                <th style="padding: 0.75rem; text-align: left;"><button class="sort-button" type="button" onclick="changeEntrySort('job_description')">Job ${renderEntrySortIndicator('job_description')}</button></th>
+                <th style="padding: 0.75rem; text-align: left;">Actions</th>
               </tr>
             </thead>
             <tbody id="entriesTableBody">
               <tr>
-                <td colspan="6" style="padding: 2rem; text-align: center; color: var(--text-secondary);">
+                <td colspan="7" style="padding: 2rem; text-align: center; color: var(--text-secondary);">
                   Loading entries...
                 </td>
               </tr>
             </tbody>
+            <tfoot id="entriesTableFoot"></tfoot>
           </table>
         </div>
       </div>
@@ -331,6 +337,9 @@
     let lastBudgetVarianceRows = [];
     let areaVarianceChart = null;
     let employeeChart = null;
+    let entrySort = { column: 'date', direction: 'asc' };
+    let entryCostCodeFilter = 'all';
+    let editingEntryId = null;
 
     document.addEventListener('DOMContentLoaded', async () => {
       loadCostCodeMerges();
@@ -345,6 +354,19 @@
       setupBudgetUploadArea();
       updateChart();
       renderSummaryStats();
+
+      const searchInput = document.getElementById('searchEntries');
+      if (searchInput) {
+        searchInput.addEventListener('input', renderTimeEntries);
+      }
+
+      const costFilter = document.getElementById('costCodeFilter');
+      if (costFilter) {
+        costFilter.addEventListener('change', (event) => {
+          entryCostCodeFilter = event.target.value;
+          renderTimeEntries();
+        });
+      }
     });
 
     async function loadProject() {
@@ -401,6 +423,7 @@
       try {
         const response = await fetch(`/api/projects/${projectId}/entries`);
         timeEntries = await response.json();
+        renderCostCodeFilterOptions();
         renderTimeEntries();
       } catch (error) {
         console.error('Error loading time entries:', error);
@@ -812,30 +835,214 @@
 
     function renderTimeEntries() {
       const tbody = document.getElementById('entriesTableBody');
+      const tfoot = document.getElementById('entriesTableFoot');
 
       renderSuspiciousEntries();
 
       if (timeEntries.length === 0) {
         tbody.innerHTML = `
           <tr>
-            <td colspan="6" style="padding: 2rem; text-align: center; color: var(--text-secondary);">
+            <td colspan="7" style="padding: 2rem; text-align: center; color: var(--text-secondary);">
               No time entries yet. Upload a payroll PDF to get started.
             </td>
           </tr>
         `;
+        if (tfoot) {
+          tfoot.innerHTML = '';
+        }
         return;
       }
 
-      tbody.innerHTML = timeEntries.map(entry => `
-        <tr style="border-bottom: 1px solid var(--border-color);">
-          <td style="padding: 0.75rem;">${formatDate(entry.date)}</td>
-          <td style="padding: 0.75rem;">${escapeHtml(entry.employee_name)}</td>
-          <td style="padding: 0.75rem;">${entry.pay_class || '-'}</td>
-          <td style="padding: 0.75rem; text-align: right;">${entry.hours.toFixed(2)}</td>
-          <td style="padding: 0.75rem;">${entry.cost_code || '-'}</td>
-          <td style="padding: 0.75rem; font-size: 0.813rem;">${entry.job_description || '-'}</td>
-        </tr>
-      `).join('');
+      const searchTerm = document.getElementById('searchEntries')?.value?.toLowerCase() || '';
+      const activeFilter = entryCostCodeFilter || 'all';
+
+      let filtered = [...timeEntries];
+
+      if (activeFilter === 'missing') {
+        filtered = filtered.filter(entry => !entry.cost_code);
+      } else if (activeFilter !== 'all') {
+        filtered = filtered.filter(entry => normalizeCostCodeLabel(entry.cost_code) === activeFilter);
+      }
+
+      if (searchTerm) {
+        filtered = filtered.filter(entry => {
+          const haystack = [
+            entry.employee_name,
+            entry.pay_class,
+            entry.cost_code,
+            entry.job_description,
+            entry.date
+          ].map(val => (val || '').toString().toLowerCase());
+
+          return haystack.some(val => val.includes(searchTerm));
+        });
+      }
+
+      filtered = sortEntries(filtered);
+
+      const totalHours = filtered.reduce((sum, entry) => sum + (Number(entry.hours) || 0), 0);
+
+      if (!filtered.length) {
+        tbody.innerHTML = `
+          <tr>
+            <td colspan="7" style="padding: 1.5rem; text-align: center; color: var(--text-secondary);">No entries match your current search or filters.</td>
+          </tr>
+        `;
+
+        if (tfoot) {
+          tfoot.innerHTML = '';
+        }
+        return;
+      }
+
+      tbody.innerHTML = filtered.map(entry => {
+        const isEditing = editingEntryId === entry.id;
+        return `
+          <tr style="border-bottom: 1px solid var(--border-color);">
+            <td style="padding: 0.75rem;">${formatDate(entry.date)}</td>
+            <td style="padding: 0.75rem;">${escapeHtml(entry.employee_name)}</td>
+            <td style="padding: 0.75rem;">${entry.pay_class || '-'}</td>
+            <td style="padding: 0.75rem; text-align: right;">${Number(entry.hours || 0).toFixed(2)}</td>
+            <td style="padding: 0.75rem;">${isEditing
+              ? `<input data-entry-code="${entry.id}" list="costCodeSuggestions" value="${escapeHtml(entry.cost_code || '')}" style="padding: 0.4rem; border: 1px solid var(--border-color); border-radius: 0.35rem; width: 120px;">`
+              : escapeHtml(entry.cost_code || '-')}
+            </td>
+            <td style="padding: 0.75rem; font-size: 0.813rem;">${isEditing
+              ? `<input data-entry-job="${entry.id}" value="${escapeHtml(entry.job_description || '')}" style="padding: 0.4rem; border: 1px solid var(--border-color); border-radius: 0.35rem; width: 180px;">`
+              : escapeHtml(entry.job_description || '-')}
+            </td>
+            <td style="padding: 0.75rem;">
+              <div style="display: flex; gap: 0.5rem; align-items: center; flex-wrap: wrap;">
+                ${isEditing
+                  ? `<button class="btn btn-primary" type="button" onclick="saveEntryEdit(${entry.id})">Save</button>
+                     <button class="btn" type="button" onclick="cancelEntryEdit()">Cancel</button>
+                     <div data-entry-status="${entry.id}" style="font-size: 0.85rem; color: var(--text-secondary);"></div>`
+                  : `<button class="chip" type="button" onclick="startEntryEdit(${entry.id})">Edit</button>`}
+              </div>
+            </td>
+          </tr>
+        `;
+      }).join('');
+
+      if (tfoot) {
+        tfoot.innerHTML = `
+          <tr style="background: #f8fafc; border-top: 2px solid var(--border-color);">
+            <td colspan="7" style="padding: 0.75rem; font-weight: 600;">
+              Visible total hours: ${totalHours.toFixed(2)}
+            </td>
+          </tr>
+        `;
+      }
+    }
+
+    function renderCostCodeFilterOptions() {
+      const select = document.getElementById('costCodeFilter');
+      if (!select) return;
+
+      const previousSelection = entryCostCodeFilter || select.value || 'all';
+      const codes = new Set();
+
+      timeEntries.forEach(entry => {
+        const normalized = normalizeCostCodeLabel(entry.cost_code);
+        if (normalized && normalized !== 'Unknown') {
+          codes.add(normalized);
+        }
+        if (!entry.cost_code) {
+          codes.add('missing');
+        }
+      });
+
+      const sortedCodes = Array.from(codes).filter(code => code !== 'missing').sort();
+
+      select.innerHTML = [
+        '<option value="all">All cost codes</option>',
+        '<option value="missing">Missing code</option>',
+        ...sortedCodes.map(code => `<option value="${escapeHtml(code)}">${escapeHtml(code)}</option>`)
+      ].join('');
+
+      const allowedValues = new Set(['all', 'missing', ...sortedCodes]);
+      const targetValue = allowedValues.has(previousSelection) ? previousSelection : 'all';
+      select.value = targetValue;
+      entryCostCodeFilter = targetValue;
+    }
+
+    function resetEntryFilters() {
+      const searchInput = document.getElementById('searchEntries');
+      const costFilter = document.getElementById('costCodeFilter');
+
+      if (searchInput) searchInput.value = '';
+      if (costFilter) costFilter.value = 'all';
+
+      entryCostCodeFilter = 'all';
+      entrySort = { column: 'date', direction: 'asc' };
+      renderTimeEntries();
+    }
+
+    function changeEntrySort(column) {
+      if (entrySort.column === column) {
+        entrySort.direction = entrySort.direction === 'asc' ? 'desc' : 'asc';
+      } else {
+        entrySort = { column, direction: column === 'date' ? 'asc' : 'desc' };
+      }
+
+      renderTimeEntries();
+    }
+
+    function renderEntrySortIndicator(column) {
+      if (entrySort.column !== column) return '';
+      return entrySort.direction === 'asc' ? '▲' : '▼';
+    }
+
+    function sortEntries(entries = []) {
+      const { column, direction } = entrySort;
+      const multiplier = direction === 'asc' ? 1 : -1;
+
+      const getValue = (entry) => {
+        switch (column) {
+          case 'employee':
+            return entry.employee_name || '';
+          case 'pay_class':
+            return entry.pay_class || '';
+          case 'hours':
+            return Number(entry.hours) || 0;
+          case 'cost_code':
+            return entry.cost_code || '';
+          case 'job_description':
+            return entry.job_description || '';
+          default:
+            return entry.date ? new Date(entry.date).getTime() : 0;
+        }
+      };
+
+      return [...entries].sort((a, b) => {
+        const aVal = getValue(a);
+        const bVal = getValue(b);
+
+        if (typeof aVal === 'string' || typeof bVal === 'string') {
+          return aVal.localeCompare(bVal) * multiplier;
+        }
+
+        return (aVal - bVal) * multiplier;
+      });
+    }
+
+    function startEntryEdit(entryId) {
+      editingEntryId = entryId;
+      renderTimeEntries();
+    }
+
+    function cancelEntryEdit() {
+      editingEntryId = null;
+      renderTimeEntries();
+    }
+
+    async function saveEntryEdit(entryId) {
+      const codeInput = document.querySelector(`[data-entry-code="${entryId}"]`);
+      const jobInput = document.querySelector(`[data-entry-job="${entryId}"]`);
+      const statusEl = document.querySelector(`[data-entry-status="${entryId}"]`);
+
+      await persistEntryUpdate(entryId, codeInput?.value || '', jobInput?.value || '', statusEl);
+      editingEntryId = null;
     }
 
     function renderSummaryStats() {
@@ -1002,15 +1209,9 @@
       return normalized.length < 3 || normalized.length > 6 || /[^\d-]/.test(trimmed);
     }
 
-    async function saveEntryCorrection(entryId) {
-      const statusEl = document.getElementById(`entryCorrectionStatus-${entryId}`);
-      const codeInput = document.querySelector(`[data-correction-input="${entryId}"]`);
-      const jobInput = document.querySelector(`[data-job-input="${entryId}"]`);
-
-      if (!codeInput) return;
-
-      const newCode = codeInput.value.trim();
-      const newJob = jobInput ? jobInput.value.trim() : '';
+    async function persistEntryUpdate(entryId, codeValue, jobValue, statusEl) {
+      const newCode = (codeValue || '').trim();
+      const newJob = (jobValue || '').trim();
 
       if (!newCode) {
         if (statusEl) statusEl.textContent = 'Please enter a cost code before saving.';
@@ -1057,6 +1258,16 @@
           statusEl.textContent = `Error: ${error.message}`;
         }
       }
+    }
+
+    async function saveEntryCorrection(entryId) {
+      const statusEl = document.getElementById(`entryCorrectionStatus-${entryId}`);
+      const codeInput = document.querySelector(`[data-correction-input="${entryId}"]`);
+      const jobInput = document.querySelector(`[data-job-input="${entryId}"]`);
+
+      if (!codeInput) return;
+
+      await persistEntryUpdate(entryId, codeInput.value, jobInput ? jobInput.value : '', statusEl);
     }
 
     function renderUploads(uploads) {
@@ -2493,12 +2704,34 @@
         progressDiv.style.display = 'none';
 
         if (response.ok) {
+          const parsedHours = Number(result.parsedHours ?? 0);
+          const detectedRaw = result.detectedTotalHours;
+          const detectedTotal = detectedRaw === null || detectedRaw === undefined ? null : Number(detectedRaw);
+          const hasDetectedTotal = Number.isFinite(detectedTotal);
+          const diff = hasDetectedTotal ? parsedHours - detectedTotal : null;
+          const ignoredLines = Array.isArray(result.ignoredLines) ? result.ignoredLines : [];
+
+          const discrepancyText = diff !== null
+            ? `<div style="margin-top: 0.35rem; font-size: 0.95rem;">PDF reported total: ${detectedTotal.toFixed(2)} hrs • Imported: ${parsedHours.toFixed(2)} hrs ${Math.abs(diff) > 0.01 ? `<strong style="color: #991b1b;">(difference ${diff.toFixed(2)} hrs)</strong>` : '(matched)'}</div>`
+            : `<div style="margin-top: 0.35rem; font-size: 0.95rem;">Imported ${parsedHours.toFixed(2)} hrs. ${hasDetectedTotal ? '' : '(No total found on PDF)'}</div>`;
+
+          const ignoredHtml = ignoredLines.length
+            ? `<div style="margin-top: 0.5rem; font-size: 0.9rem; color: var(--text-secondary);">
+                Possible time entry lines that were skipped (${ignoredLines.length}):
+                <ul style="margin: 0.35rem 0 0 1.25rem; padding: 0; list-style: disc;">
+                  ${ignoredLines.map(line => `<li>${escapeHtml(line)}</li>`).join('')}
+                </ul>
+              </div>`
+            : '';
+
           resultDiv.innerHTML = `
             <div class="alert alert-success">
-              ✓ Successfully processed ${result.entriesInserted} time entries from ${result.entriesFound} found in the PDF
+              <div>✓ Successfully processed ${result.entriesInserted} time entries from ${result.entriesFound} found in the PDF</div>
+              ${discrepancyText}
+              ${ignoredHtml}
             </div>
           `;
-          
+
           // Reload data
           await loadTimeEntries();
           await loadDetailedStats();

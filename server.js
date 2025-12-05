@@ -552,7 +552,7 @@ app.post('/api/projects/:id/upload', upload.single('payroll'), async (req, res) 
     
     // Parse PDF
     console.log('Parsing PDF:', file.path);
-    const entries = await parsePayrollPDF(file.path);
+    const { entries = [], summary = {} } = await parsePayrollPDF(file.path);
     console.log(`Extracted ${entries.length} time entries`);
     
     // Prepare entries for batch insert
@@ -576,11 +576,14 @@ app.post('/api/projects/:id/upload', upload.single('payroll'), async (req, res) 
     const inserted = await timeEntryQueries.createBatch(entryDataArray);
     console.log(`Successfully inserted ${inserted} entries`);
     
-    res.json({ 
-      success: true, 
+    res.json({
+      success: true,
       uploadId,
       entriesFound: entries.length,
-      entriesInserted: inserted
+      entriesInserted: inserted,
+      parsedHours: summary.parsedHours ?? null,
+      detectedTotalHours: summary.detectedTotalHours ?? null,
+      ignoredLines: summary.ignoredLines?.slice(0, 15) || []
     });
   } catch (error) {
     console.error('Error uploading payroll:', error);
