@@ -27,7 +27,7 @@ async function parsePayrollPDF(filePath) {
     // Example: "4086       Arthur E Stefanick Jr             10/24/23"
     const employeeMatch = line.match(/^(\d{4})\s+([A-Z][a-zA-Z\s\.'-]+?)\s+(\d{2}\/\d{2}\/\d{2})/);
     if (employeeMatch) {
-      currentUnionLocal = employeeMatch[1];
+      currentUnionLocal = null;
       currentEmployee = employeeMatch[2].trim();
       currentDate = employeeMatch[3];
       continue;
@@ -54,31 +54,36 @@ async function parsePayrollPDF(filePath) {
     }
 
     // Check for time entry line - made more flexible
-    // The key identifiers are: Pay Class (J/F/G/A1-A6), 3-digit pay ID, Cert Class, hours with decimal, rate with 5 decimals, cost code
+    // The key identifiers are: Pay Class (J/F/G/A1-A6), union local (may be blank), Cert Class, Pay ID, hours with decimal, rate with 5 decimals, cost code
     // Example: "      J   841       TA01J1       0                 2.50      31.68000           79.207552.  Cuy Fal Bld 1 1st Fl             09-170"
     // More flexible pattern that handles varying spacing and different "7552" vs "7572" endings
     // Cost code pattern updated to handle variable lengths: 1-2 digits, hyphen, 2-5 digits (e.g., "1-400", "09-170", "01-4000")
     // Certified class suffix can sometimes be a letter (e.g., "CA01AO") instead of a digit
     // Amount column can vary, so accept any numeric group instead of the previous fixed 75xx pattern
-    const entryMatch = line.match(/^\s+([A-Z]\d?)\s+(\d{3})\s+([A-Z]{2}\d{2}[A-Z][A-Z0-9])\s+\S+\s+(-?[\d.,]+-?)\s+([\d.,]+)\s+[\d.,]+\s+(.+?)\s+([\d]{1,2}-[\d]{2,5})/);
+    const entryMatch = line.match(/^\s+([A-Z]\d?)\s+(\d{0,4})\s+([A-Z]{2}\d{2}[A-Z][A-Z0-9])\s+(\S+)\s+(-?[\d.,]+-?)\s+([\d.,]+)\s+[\d.,]+\s+(.+?)\s+([\d]{1,2}-[\d]{2,5})/);
 
     // Fallback: same structure but missing/invalid cost code at the end
-    const entryNoCodeMatch = !entryMatch && line.match(/^\s+([A-Z]\d?)\s+(\d{3})\s+([A-Z]{2}\d{2}[A-Z][A-Z0-9])\s+\S+\s+(-?[\d.,]+-?)\s+([\d.,]+)\s+[\d.,]+\s+(.+)/);
+    const entryNoCodeMatch = !entryMatch && line.match(/^\s+([A-Z]\d?)\s+(\d{0,4})\s+([A-Z]{2}\d{2}[A-Z][A-Z0-9])\s+(\S+)\s+(-?[\d.,]+-?)\s+([\d.,]+)\s+[\d.,]+\s+(.+)/);
 
     if ((entryMatch || entryNoCodeMatch) && currentEmployee && currentDate) {
       const parts = entryMatch || entryNoCodeMatch;
       const payClass = parts[1];
-      const payId = parts[2];
+      const unionLocalRaw = (parts[2] || '').trim();
+      const unionLocal = unionLocalRaw || currentUnionLocal;
+      if (unionLocalRaw) {
+        currentUnionLocal = unionLocalRaw;
+      }
       const certifiedClass = parts[3];
-      const hoursRaw = (parts[4] || '').trim();
+      const payId = parts[4];
+      const hoursRaw = (parts[5] || '').trim();
       const hasLeadingMinus = /^-/.test(hoursRaw);
       const hasTrailingMinus = /-\s*$/.test(hoursRaw);
       const numericHours = parseFloat(hoursRaw.replace(/[^\d.]/g, '')) || 0;
       const hours = hasLeadingMinus ? -numericHours : numericHours;
       const included = !hasTrailingMinus;
-      const rate = parseNumber(parts[5]);
-      const jobDescription = (parts[6] || '').trim();
-      const costCode = entryMatch ? parts[7] : null;
+      const rate = parseNumber(parts[6]);
+      const jobDescription = (parts[7] || '').trim();
+      const costCode = entryMatch ? parts[8] : null;
 
       if (hoursIsNegative) {
         ignoredLines.push(`${line.trim()} (ignored negative hours)`);
@@ -89,7 +94,7 @@ async function parsePayrollPDF(filePath) {
         employee_name: currentEmployee,
         pay_id: payId,
         pay_class: payClass,
-        union_local: currentUnionLocal,
+        union_local: unionLocal,
         certified_class: certifiedClass,
         date: convertDate(currentDate),
         hours: hours,

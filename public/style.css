@@ -588,6 +588,41 @@ nav a:hover, nav a.active {
   border-color: #a5b4fc;
 }
 
+.include-chip {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.4rem;
+  font-weight: 700;
+  border-width: 1.5px;
+}
+
+.include-chip--included {
+  background: #ecfdf3;
+  color: #166534;
+  border-color: #bbf7d0;
+}
+
+.include-chip--included:hover {
+  background: #dcfce7;
+  border-color: #86efac;
+}
+
+.include-chip--excluded {
+  background: #fef2f2;
+  color: #991b1b;
+  border-color: #fecaca;
+}
+
+.include-chip--excluded:hover {
+  background: #fee2e2;
+  border-color: #fca5a5;
+}
+
+.include-chip-hint {
+  font-weight: 500;
+  color: var(--text-secondary);
+}
+
 /* Area comparison table */
 .area-table {
   width: 100%;

@@ -975,8 +975,10 @@
             </td>
             <td style="padding: 0.75rem;">
               <div style="display: flex; align-items: center; gap: 0.5rem; flex-wrap: wrap;">
-                <span style="display: inline-flex; align-items: center; gap: 0.3rem; padding: 0.25rem 0.5rem; border-radius: 999px; font-size: 0.85rem; background: ${entry.included === false ? '#fef2f2' : '#ecfdf3'}; color: ${entry.included === false ? '#991b1b' : '#166534'}; border: 1px solid ${entry.included === false ? '#fecaca' : '#bbf7d0'};">${entry.included === false ? 'Excluded' : 'Included'}</span>
-                <button class="chip" type="button" onclick="toggleEntryIncluded(${entry.id}, ${entry.included !== false})">${entry.included !== false ? 'Exclude' : 'Include'}</button>
+                <button class="chip include-chip ${entry.included === false ? 'include-chip--excluded' : 'include-chip--included'}" type="button" onclick="toggleEntryIncluded(${entry.id}, ${entry.included !== false})">
+                  <span>${entry.included === false ? 'Excluded' : 'Included'}</span>
+                  <span class="include-chip-hint">${entry.included !== false ? 'Click to exclude' : 'Click to include'}</span>
+                </button>
               </div>
               <div data-include-status="${entry.id}" style="font-size: 0.85rem; color: var(--text-secondary); margin-top: 0.35rem;"></div>
             </td>
