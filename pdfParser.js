@@ -8,10 +8,12 @@ const fs = require('fs');
 async function parsePayrollPDF(filePath) {
   const dataBuffer = fs.readFileSync(filePath);
   const data = await pdf(dataBuffer);
-  
+
   const entries = [];
+  const ignoredLines = [];
+  const detectedTotals = [];
   const lines = data.text.split('\n');
-  
+
   let currentEmployee = null;
   let currentUnionLocal = null;
   let currentDate = null;
@@ -39,22 +41,34 @@ async function parsePayrollPDF(filePath) {
       continue;
     }
     
+    // Capture reported totals for later reconciliation
+    const totalLineMatch = line.match(/total\s+hours\s+([\d.,]+)/i) || line.match(/grand\s+total\s+([\d.,]+)/i);
+    if (totalLineMatch) {
+      detectedTotals.push(parseNumber(totalLineMatch[1]));
+    }
+
     // Check for time entry line - made more flexible
     // The key identifiers are: Pay Class (J/F/G/A1-A6), 3-digit pay ID, Cert Class, hours with decimal, rate with 5 decimals, cost code
     // Example: "      J   841       TA01J1       0                 2.50      31.68000           79.207552.  Cuy Fal Bld 1 1st Fl             09-170"
     // More flexible pattern that handles varying spacing and different "7552" vs "7572" endings
     // Cost code pattern updated to handle variable lengths: 1-2 digits, hyphen, 2-5 digits (e.g., "1-400", "09-170", "01-4000")
-    const entryMatch = line.match(/^\s+([JFGA]\d?)\s+(\d{3})\s+([A-Z]{2}\d{2}[A-Z]\d)\s+\S+\s+([\d.]+)\s+([\d.]+)\s+[\d.,]+75\d{2}\.\s+(.+?)\s+([\d]{1,2}-[\d]{2,5})/);
-    
-    if (entryMatch && currentEmployee && currentDate) {
-      const payClass = entryMatch[1];
-      const payId = entryMatch[2];
-      const certifiedClass = entryMatch[3];
-      const hours = parseFloat(entryMatch[4]);
-      const rate = parseFloat(entryMatch[5]);
-      const jobDescription = entryMatch[6].trim();
-      const costCode = entryMatch[7];
-      
+    // Certified class suffix can sometimes be a letter (e.g., "CA01AO") instead of a digit
+    // Amount column can vary, so accept any numeric group instead of the previous fixed 75xx pattern
+    const entryMatch = line.match(/^\s+([A-Z]\d?)\s+(\d{3})\s+([A-Z]{2}\d{2}[A-Z][A-Z0-9])\s+\S+\s+([\d.,]+)\s+([\d.,]+)\s+[\d.,]+\s+(.+?)\s+([\d]{1,2}-[\d]{2,5})/);
+
+    // Fallback: same structure but missing/invalid cost code at the end
+    const entryNoCodeMatch = !entryMatch && line.match(/^\s+([A-Z]\d?)\s+(\d{3})\s+([A-Z]{2}\d{2}[A-Z][A-Z0-9])\s+\S+\s+([\d.,]+)\s+([\d.,]+)\s+[\d.,]+\s+(.+)/);
+
+    if ((entryMatch || entryNoCodeMatch) && currentEmployee && currentDate) {
+      const parts = entryMatch || entryNoCodeMatch;
+      const payClass = parts[1];
+      const payId = parts[2];
+      const certifiedClass = parts[3];
+      const hours = parseNumber(parts[4]);
+      const rate = parseNumber(parts[5]);
+      const jobDescription = (parts[6] || '').trim();
+      const costCode = entryMatch ? parts[7] : null;
+
       entries.push({
         employee_name: currentEmployee,
         pay_id: payId,
@@ -67,10 +81,32 @@ async function parsePayrollPDF(filePath) {
         cost_code: costCode,
         job_description: jobDescription
       });
+    } else {
+      const looksLikeEntry = /[A-Z]\d?\s+\d{3}\s+[A-Z]{2}\d{2}[A-Z][A-Z0-9]/.test(line);
+      const hasHours = /\d+\.\d{1,2}/.test(line);
+      if (looksLikeEntry && hasHours) {
+        ignoredLines.push(line.trim());
+      }
     }
   }
-  
-  return entries;
+
+  const parsedHours = entries.reduce((sum, entry) => sum + (Number(entry.hours) || 0), 0);
+  const detectedTotalHours = detectedTotals.length ? Math.max(...detectedTotals) : null;
+
+  return {
+    entries,
+    summary: {
+      parsedHours,
+      detectedTotalHours,
+      ignoredLines
+    }
+  };
+}
+
+function parseNumber(value) {
+  if (value === undefined || value === null) return 0;
+  const clean = value.toString().replace(/[^\d.]/g, '');
+  return parseFloat(clean) || 0;
 }
 
 /**
