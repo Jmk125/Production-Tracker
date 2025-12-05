@@ -44,12 +44,13 @@ async function parsePayrollPDF(filePath) {
     // Capture reported totals for later reconciliation
     if (/total\s+hours/i.test(line) || /grand\s+totals?/i.test(line)) {
       const numberMatches = line.match(/([\d]+[\d.,]*)/g) || [];
-      numberMatches.forEach(num => {
-        const parsed = parseNumber(num);
+      if (numberMatches.length) {
+        // The first numeric column on these lines is the hours total; later numbers are dollar amounts
+        const parsed = parseNumber(numberMatches[0]);
         if (parsed > 0) {
           detectedTotals.push(parsed);
         }
-      });
+      }
     }
 
     // Check for time entry line - made more flexible
@@ -69,10 +70,17 @@ async function parsePayrollPDF(filePath) {
       const payClass = parts[1];
       const payId = parts[2];
       const certifiedClass = parts[3];
-      const hours = parseNumber(parts[4]);
+      const hoursRaw = parts[4];
+      const hoursIsNegative = /-\s*$/.test(hoursRaw);
+      const hours = hoursIsNegative ? 0 : parseNumber(hoursRaw);
       const rate = parseNumber(parts[5]);
       const jobDescription = (parts[6] || '').trim();
       const costCode = entryMatch ? parts[7] : null;
+
+      if (hoursIsNegative) {
+        ignoredLines.push(`${line.trim()} (ignored negative hours)`);
+        continue;
+      }
 
       entries.push({
         employee_name: currentEmployee,
