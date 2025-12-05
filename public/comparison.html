@@ -1783,6 +1783,9 @@
             : hasSpentHours
               ? `<span style="display: inline-flex; align-items: center; gap: 0.35rem; padding: 0.35rem 0.5rem; background: rgba(34,197,94,0.12); border-radius: 999px; color: var(--success-color); font-size: 0.8rem;">Auto-matched by code</span>`
               : `<span style="display: inline-flex; align-items: center; gap: 0.35rem; padding: 0.35rem 0.5rem; background: var(--card-background); border-radius: 999px; color: var(--text-secondary); font-size: 0.8rem;">Unmatched</span>`;
+          const undoButton = mappedTarget
+            ? `<button class="btn btn-secondary" style="padding: 0.45rem 0.6rem;" onclick="handleMappingSelect(${project.projectId}, '${encodeURIComponent(code)}', '')">Undo match</button>`
+            : '';
 
           return `
             <div style="display: grid; grid-template-columns: 1.2fr 1fr 0.9fr; gap: 0.75rem; align-items: center; padding: 0.65rem 0.75rem; border: 1px solid var(--border-color); border-radius: 6px; background: var(--card-background);">
@@ -1793,7 +1796,7 @@
               <div style="display: flex; align-items: center; gap: 0.5rem; flex-wrap: wrap;">
                 ${mappedLabel}
               </div>
-              <div style="display: flex; align-items: center; gap: 0.5rem; justify-content: flex-end;">
+              <div style="display: flex; align-items: center; gap: 0.5rem; justify-content: flex-end; flex-wrap: wrap;">
                 <select
                   class="form-control"
                   style="min-width: 180px; font-family: monospace;"
@@ -1805,6 +1808,7 @@
                     <option value="${escapeHtml(actualCode)}" ${mappedTarget === actualCode ? 'selected' : ''}>${escapeHtml(actualCode)}</option>
                   `).join('')}
                 </select>
+                ${undoButton}
               </div>
             </div>
           `;
