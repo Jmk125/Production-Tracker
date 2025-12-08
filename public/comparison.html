@@ -1044,11 +1044,19 @@
         : 0
       );
 
+      const backgroundColors = counts.map(count =>
+        count === 1 ? 'rgba(107, 114, 128, 0.65)' : 'rgba(16, 24, 40, 0.78)'
+      );
+
+      const borderColors = counts.map(count =>
+        count === 1 ? 'rgba(75, 85, 99, 0.95)' : 'rgba(16, 24, 40, 0.95)'
+      );
+
       return {
         label: 'All Projects Average',
         data: averages,
-        backgroundColor: 'rgba(16, 24, 40, 0.78)',
-        borderColor: 'rgba(16, 24, 40, 0.95)',
+        backgroundColor: backgroundColors,
+        borderColor: borderColors,
         borderWidth: 2,
         costCodeRows: null,
         isAverageBar: true
