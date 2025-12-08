@@ -163,6 +163,13 @@
                 <input type="checkbox" id="varianceAverageOnlyToggle" onchange="renderCostCodeVarianceChart(getFilteredComparisonData())" disabled>
                 Average only
               </label>
+              <div style="display: flex; align-items: center; gap: 0.35rem;">
+                <label for="varianceAggregateMode" style="font-size: 0.9rem; color: var(--text-secondary); white-space: nowrap;">Average bar uses</label>
+                <select id="varianceAggregateMode" onchange="renderCostCodeVarianceChart(getFilteredComparisonData())">
+                  <option value="average" selected>Average</option>
+                  <option value="median">Median</option>
+                </select>
+              </div>
               <div style="color: var(--text-secondary); font-size: 0.9rem;">Respects cost code filters</div>
             </div>
           </div>
@@ -1026,23 +1033,35 @@
       };
     }
 
-    function buildVarianceAverageDataset(datasets = [], labels = []) {
+    function buildVarianceAverageDataset(datasets = [], labels = [], aggregateMode = 'average') {
       const totals = labels.map(() => 0);
       const counts = labels.map(() => 0);
+      const valuesByLabel = labels.map(() => []);
 
       datasets.forEach(dataset => {
         (dataset.data || []).forEach((value, index) => {
           if (Number.isFinite(value)) {
             totals[index] += value;
             counts[index] += 1;
+            valuesByLabel[index].push(value);
           }
         });
       });
 
-      const averages = totals.map((sum, index) => counts[index]
-        ? Number((sum / counts[index]).toFixed(2))
-        : 0
-      );
+      const aggregateValues = totals.map((sum, index) => {
+        if (!counts[index]) return 0;
+
+        if (aggregateMode === 'median') {
+          const sorted = valuesByLabel[index].slice().sort((a, b) => a - b);
+          const mid = Math.floor(sorted.length / 2);
+          const median = sorted.length % 2
+            ? sorted[mid]
+            : (sorted[mid - 1] + sorted[mid]) / 2;
+          return Number(median.toFixed(2));
+        }
+
+        return Number((sum / counts[index]).toFixed(2));
+      });
 
       const backgroundColors = counts.map(count =>
         count === 1 ? 'rgba(107, 114, 128, 0.65)' : 'rgba(16, 24, 40, 0.78)'
@@ -1053,8 +1072,8 @@
       );
 
       return {
-        label: 'All Projects Average',
-        data: averages,
+        label: aggregateMode === 'median' ? 'All Projects Median' : 'All Projects Average',
+        data: aggregateValues,
         backgroundColor: backgroundColors,
         borderColor: borderColors,
         borderWidth: 2,
@@ -1103,6 +1122,7 @@
       const showAverageBar = document.getElementById('showVarianceAverageBar')?.checked;
       const averageOnlyToggle = document.getElementById('varianceAverageOnlyToggle');
       const varianceMetric = document.getElementById('varianceMetricSelect')?.value === 'percent' ? 'percent' : 'hours';
+      const aggregateMode = document.getElementById('varianceAggregateMode')?.value || 'average';
       const averageOnly = !!showAverageBar && !!averageOnlyToggle?.checked;
 
       if (averageOnlyToggle) {
@@ -1165,7 +1185,7 @@
       });
 
       const averageDataset = showAverageBar
-        ? buildVarianceAverageDataset(projectDatasets, sortedCodes)
+        ? buildVarianceAverageDataset(projectDatasets, sortedCodes, aggregateMode)
         : null;
 
       const datasets = averageOnly && averageDataset
